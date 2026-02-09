@@ -42,6 +42,10 @@ cargo run -p app_desktop
 
 Linux runtime/linking requires system libraries such as `xcb` and `xkbcommon`.
 
+### Windows runtime note
+
+Windows release binaries are built with static CRT (`crt-static`) so they do not require `VCRUNTIME140.dll` to be preinstalled on the target machine.
+
 ## CI outputs
 
 GitHub Actions builds and uploads platform binaries for:
