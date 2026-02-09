@@ -1,0 +1,28 @@
+[package]
+name = "app_desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "app_desktop"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+anyhow.workspace = true
+config = { path = "../config" }
+core_orchestrator = { path = "../core_orchestrator" }
+core_types = { path = "../core_types" }
+dirs.workspace = true
+gpui.workspace = true
+i18n = { path = "../i18n" }
+mcp_runtime = { path = "../mcp_runtime" }
+provider_zed = { path = "../provider_zed" }
+secrets = { path = "../secrets" }
+storage_sqlite = { path = "../storage_sqlite" }
+tokio.workspace = true
+tracing.workspace = true
+tracing-appender.workspace = true
+tracing-subscriber.workspace = true
