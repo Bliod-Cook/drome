@@ -57,3 +57,83 @@ jobs:
 
       - name: Run tests
         run: cargo test --workspace
+
+  build:
+    name: Build Artifact (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: checks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: cherry-app-linux-x86_64
+            archive_path: cherry-app-linux-x86_64.tar.gz
+            bin_ext: ""
+          - os: macos-latest
+            artifact_name: cherry-app-macos
+            archive_path: cherry-app-macos.tar.gz
+            bin_ext: ""
+          - os: windows-latest
+            artifact_name: cherry-app-windows-x86_64
+            archive_path: cherry-app-windows-x86_64.zip
+            bin_ext: ".exe"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies for GPUI
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libegl1-mesa-dev \
+            libgl1-mesa-dev \
+            libwayland-dev \
+            libx11-xcb-dev \
+            libxcb1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxi-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libxrandr-dev \
+            pkg-config
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: swatinem/rust-cache@v2
+
+      - name: Build release binaries
+        run: cargo build -p cherry-app --release --bins
+
+      - name: Package artifact (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          mkdir -p dist
+          cp "target/release/cherry-app${{ matrix.bin_ext }}" dist/
+          cp "target/release/migrate_legacy${{ matrix.bin_ext }}" dist/
+          cp "target/release/migrate_legacy_dir${{ matrix.bin_ext }}" dist/
+          tar -czf "${{ matrix.archive_path }}" -C dist .
+
+      - name: Package artifact (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          Copy-Item "target/release/cherry-app${{ matrix.bin_ext }}" dist/
+          Copy-Item "target/release/migrate_legacy${{ matrix.bin_ext }}" dist/
+          Copy-Item "target/release/migrate_legacy_dir${{ matrix.bin_ext }}" dist/
+          Compress-Archive -Path dist/* -DestinationPath "${{ matrix.archive_path }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.archive_path }}
+          if-no-files-found: error
