@@ -3,8 +3,9 @@ use std::{path::PathBuf, sync::Arc};
 use cherry_core::{AppRoute, ChatMessage, Conversation};
 use cherry_services::{AppServices, AppServicesBuilder, BackupChannel};
 use gpui::{
-    App, AppContext, Application, Context, InteractiveElement, IntoElement, KeyDownEvent,
-    MouseButton, ParentElement, Render, Window, WindowOptions, div,
+    App, AppContext, Application, Bounds, Context, InteractiveElement, IntoElement, KeyDownEvent,
+    MouseButton, ParentElement, Render, Styled, Window, WindowBounds, WindowOptions, div, hsla,
+    prelude::*, px, rgb, size,
 };
 use pulldown_cmark::{Event, Parser};
 use tokio::runtime::Runtime;
@@ -416,8 +417,18 @@ impl CherryAppView {
         format!(
             "Cherry Studio (Rust + GPUI)\nActive route: {}\n{}",
             self.route.title(),
-            self.status
+            self.compact_status()
         )
+    }
+
+    fn compact_status(&self) -> String {
+        let mut chars = self.status.chars();
+        let preview: String = chars.by_ref().take(200).collect();
+        if chars.next().is_some() {
+            format!("{preview}…")
+        } else {
+            preview
+        }
     }
 
     fn messages_text(&self) -> String {
@@ -650,12 +661,32 @@ impl CherryAppView {
 
 impl Render for CherryAppView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut sidebar = div().child("Navigation (click or press 1-9):");
+        let mut sidebar = div()
+            .id("sidebar")
+            .flex()
+            .flex_col()
+            .gap_1()
+            .w(px(220.))
+            .h_full()
+            .p_3()
+            .bg(rgb(0x1f2937))
+            .text_color(rgb(0xf1f5f9))
+            .border_r_1()
+            .border_color(hsla(0.0, 0.0, 1.0, 0.14))
+            .overflow_y_scroll()
+            .child("Navigation (click or press 1-9):");
         for route in self.routes.iter().copied() {
             let active_prefix = if route == self.route { "● " } else { "○ " };
             let label = format!("{active_prefix}{}", route.title());
             sidebar = sidebar.child(
                 div()
+                    .p_1()
+                    .rounded_sm()
+                    .bg(if route == self.route {
+                        rgb(0x334155)
+                    } else {
+                        rgb(0x111827)
+                    })
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
@@ -1305,6 +1336,17 @@ impl Render for CherryAppView {
         };
 
         let content = div()
+            .id("content")
+            .flex()
+            .flex_col()
+            .flex_1()
+            .h_full()
+            .overflow_y_scroll()
+            .p_3()
+            .gap_2()
+            .bg(rgb(0x0f172a))
+            .text_color(rgb(0xe2e8f0))
+            .whitespace_normal()
             .child(self.header_text())
             .child(self.summary_for_route())
             .child("Recent Messages:")
@@ -1314,6 +1356,10 @@ impl Render for CherryAppView {
             .child(route_actions);
 
         div()
+            .size_full()
+            .flex()
+            .bg(rgb(0x0b1120))
+            .text_sm()
             .tab_index(0)
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
                 if let Some(route) = Self::key_to_route(event.keystroke.key.as_str()) {
@@ -1339,11 +1385,18 @@ fn main() {
         .expect("seed workspace data");
 
     Application::new().run(move |cx: &mut App| {
-        cx.open_window(WindowOptions::default(), {
-            let services = services.clone();
-            let runtime = runtime.clone();
-            move |_window, cx| cx.new(|_| CherryAppView::new(services, runtime))
-        })
+        let bounds = Bounds::centered(None, size(px(1280.), px(860.)), cx);
+        cx.open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                ..Default::default()
+            },
+            {
+                let services = services.clone();
+                let runtime = runtime.clone();
+                move |_window, cx| cx.new(|_| CherryAppView::new(services, runtime))
+            },
+        )
         .expect("open gpui window");
     });
 }
