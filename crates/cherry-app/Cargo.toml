@@ -1,0 +1,17 @@
+[package]
+name = "cherry-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+gpui.workspace = true
+parking_lot.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+pulldown-cmark = "0.12"
+cherry-core = { path = "../cherry-core" }
+cherry-services = { path = "../cherry-services" }
