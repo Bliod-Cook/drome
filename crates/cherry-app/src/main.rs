@@ -1,11 +1,11 @@
 use std::{path::PathBuf, sync::Arc};
 
-use cherry_core::{AppRoute, ChatMessage, Conversation};
+use cherry_core::{AppRoute, ChatMessage, Conversation, MessageRole};
 use cherry_services::{AppServices, AppServicesBuilder, BackupChannel};
 use gpui::{
-    App, AppContext, Application, Bounds, Context, InteractiveElement, IntoElement, KeyDownEvent,
-    MouseButton, ParentElement, Render, Styled, Window, WindowBounds, WindowOptions, div, hsla,
-    prelude::*, px, rgb, size,
+    App, AppContext, Application, Bounds, Context, Div, InteractiveElement, IntoElement,
+    KeyDownEvent, MouseButton, ParentElement, Render, Styled, Window, WindowBounds, WindowOptions,
+    div, hsla, prelude::*, px, rgb, size,
 };
 use pulldown_cmark::{Event, Parser};
 use tokio::runtime::Runtime;
@@ -431,21 +431,6 @@ impl CherryAppView {
         }
     }
 
-    fn messages_text(&self) -> String {
-        if self.messages.is_empty() {
-            return "No messages yet. Use Home/Translate/Code actions to generate messages."
-                .to_owned();
-        }
-
-        self.messages
-            .iter()
-            .rev()
-            .take(8)
-            .map(|message| format!("{:?}: {}", message.role, message.content))
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-
     fn markdown_preview(&self, markdown: &str) -> String {
         let mut output = String::new();
         for event in Parser::new(markdown) {
@@ -643,6 +628,141 @@ impl CherryAppView {
             .join(" ")
     }
 
+    fn messages_bubble_panel(&self) -> Div {
+        if self.messages.is_empty() {
+            return div()
+                .w_full()
+                .p_2()
+                .rounded_sm()
+                .bg(rgb(0x020617))
+                .border_1()
+                .border_color(hsla(0.0, 0.0, 1.0, 0.1))
+                .text_color(rgb(0x94a3b8))
+                .child("No messages yet. Use actions in Home/Translate/Code.");
+        }
+
+        let mut panel = div().w_full().flex().flex_col().gap_1();
+        for message in self.messages.iter().rev().take(10) {
+            let (header_color, bubble_color) = match message.role {
+                MessageRole::System => (rgb(0xf59e0b), rgb(0x292524)),
+                MessageRole::User => (rgb(0x38bdf8), rgb(0x0c4a6e)),
+                MessageRole::Assistant => (rgb(0x34d399), rgb(0x052e2b)),
+                MessageRole::Tool => (rgb(0xe879f9), rgb(0x3b0764)),
+            };
+            let role_label = format!("{:?}", message.role);
+
+            panel = panel.child(
+                div()
+                    .w_full()
+                    .p_2()
+                    .rounded_sm()
+                    .bg(bubble_color)
+                    .border_1()
+                    .border_color(hsla(0.0, 0.0, 1.0, 0.12))
+                    .child(div().text_color(header_color).child(role_label))
+                    .child(
+                        div()
+                            .w_full()
+                            .whitespace_normal()
+                            .text_color(rgb(0xe2e8f0))
+                            .child(message.content.clone()),
+                    ),
+            );
+        }
+        panel
+    }
+
+    fn streaming_chip_panel(&self) -> Div {
+        let text = self.streaming_preview_text();
+        div()
+            .w_full()
+            .p_2()
+            .rounded_sm()
+            .bg(rgb(0x020617))
+            .border_1()
+            .border_color(hsla(0.0, 0.0, 1.0, 0.1))
+            .whitespace_normal()
+            .line_clamp(3)
+            .text_color(rgb(0xcbd5e1))
+            .child(text)
+    }
+
+    fn section_label(title: impl Into<String>) -> Div {
+        div().w_full().text_color(rgb(0x93c5fd)).child(title.into())
+    }
+
+    fn action_button(label: impl Into<String>, color: u32) -> Div {
+        div()
+            .w_full()
+            .px_2()
+            .py_1()
+            .rounded_sm()
+            .bg(rgb(color))
+            .border_1()
+            .border_color(hsla(0.0, 0.0, 1.0, 0.15))
+            .text_color(rgb(0xf8fafc))
+            .child(label.into())
+    }
+
+    fn info_box(text: impl Into<String>) -> Div {
+        div()
+            .w_full()
+            .p_2()
+            .rounded_sm()
+            .bg(rgb(0x020617))
+            .border_1()
+            .border_color(hsla(0.0, 0.0, 1.0, 0.1))
+            .whitespace_normal()
+            .text_color(rgb(0xcbd5e1))
+            .child(text.into())
+    }
+
+    fn metric_chip(label: &str, value: usize, color: u32) -> Div {
+        div()
+            .flex()
+            .flex_col()
+            .gap_0p5()
+            .p_2()
+            .rounded_sm()
+            .bg(rgb(0x0b1220))
+            .border_1()
+            .border_color(hsla(0.0, 0.0, 1.0, 0.1))
+            .child(div().text_color(rgb(color)).child(label.to_owned()))
+            .child(div().text_color(rgb(0xf8fafc)).child(value.to_string()))
+    }
+
+    fn overview_metrics_panel(&self) -> Div {
+        let files = self
+            .services
+            .list_files()
+            .map(|items| items.len())
+            .unwrap_or(0);
+        let notes = self
+            .services
+            .list_notes()
+            .map(|items| items.len())
+            .unwrap_or(0);
+        let knowledge = self
+            .services
+            .list_knowledge_documents()
+            .map(|items| items.len())
+            .unwrap_or(0);
+        let mcp = self
+            .services
+            .list_mcp_servers()
+            .map(|items| items.len())
+            .unwrap_or(0);
+
+        div()
+            .w_full()
+            .flex()
+            .gap_1()
+            .child(Self::metric_chip("Files", files, 0x38bdf8))
+            .child(Self::metric_chip("Notes", notes, 0x34d399))
+            .child(Self::metric_chip("Knowledge", knowledge, 0xf59e0b))
+            .child(Self::metric_chip("MCP", mcp, 0xe879f9))
+    }
+
     fn key_to_route(key: &str) -> Option<AppRoute> {
         match key {
             "1" => Some(AppRoute::Home),
@@ -698,667 +818,781 @@ impl Render for CherryAppView {
             );
         }
 
-        let route_actions = match self.route {
+        let route_actions_raw = match self.route {
             AppRoute::Home => {
                 let mut home_actions = div()
-                    .child("Home Quick Actions:")
+                    .child(Self::section_label("Home Quick Actions"))
+                    .child(
+                        Self::action_button("➕ New Conversation", 0x1d4ed8).on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                if let Err(error) = this.create_new_conversation() {
+                                    this.status = format!("create conversation failed: {error}");
+                                }
+                                cx.notify();
+                            }),
+                        ),
+                    )
+                    .child(
+                        Self::action_button("▶ Send Progress Prompt", 0x0f766e).on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                if let Err(error) =
+                                    this.send_quick_prompt("请总结当前迁移进度并给出下一步计划。")
+                                {
+                                    this.status = format!("send prompt failed: {error}");
+                                }
+                                cx.notify();
+                            }),
+                        ),
+                    )
+                    .child(
+                        Self::action_button("⏩ Stream Progress Prompt", 0x7c3aed).on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                if let Err(error) = this
+                                    .send_quick_prompt_streaming("请以流式方式总结本周迁移进度。")
+                                {
+                                    this.status = format!("stream prompt failed: {error}");
+                                }
+                                cx.notify();
+                            }),
+                        ),
+                    );
+
+                if !self.conversations.is_empty() {
+                    home_actions = home_actions.child(Self::section_label("Conversations"));
+                }
+                for conversation in self.conversations.iter().take(10) {
+                    let conversation_id = conversation.id;
+                    let title = conversation.title.clone();
+                    let conversation_title = conversation.title.clone();
+                    home_actions = home_actions.child(
+                        Self::action_button(format!("- {conversation_title}"), 0x1e293b)
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, _window, cx| {
+                                    this.active_conversation_id = Some(conversation_id);
+                                    if let Err(error) = this.load_messages_for_active() {
+                                        this.status =
+                                            format!("switch conversation failed: {error}");
+                                    } else {
+                                        this.status = format!("Switched conversation: {title}");
+                                    }
+                                    cx.notify();
+                                }),
+                            ),
+                    );
+                }
+                home_actions
+            }
+            AppRoute::Store => div()
+                .child(Self::section_label("Store Actions"))
+                .child(
+                    Self::action_button("📦 Export Backup JSON", 0x0f766e).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            if let Err(error) =
+                                this.services.export_backup_to_channel(BackupChannel::Local)
+                            {
+                                this.status = format!("export backup failed: {error}");
+                            } else {
+                                this.status = "Exported local backup".to_owned();
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(
+                    Self::action_button("📥 Import Backup JSON", 0x1d4ed8).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            match this
+                                .services
+                                .import_latest_backup_from_channel(BackupChannel::Local)
+                            {
+                                Ok(report) => {
+                                    this.status = format!(
+                                        "Imported local backup: conversations={} messages={}",
+                                        report.conversations, report.messages
+                                    );
+                                }
+                                Err(error) => {
+                                    this.status = format!("import backup failed: {error}");
+                                }
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(
+                    Self::action_button("☁️ Export WebDAV Backup", 0x7c3aed).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            let result = (|| -> anyhow::Result<()> {
+                                this.services
+                                    .set_backup_channel_enabled(BackupChannel::WebDav, true)?;
+                                this.services
+                                    .set_backup_channel_enabled(BackupChannel::S3, true)?;
+                                this.services
+                                    .set_backup_channel_enabled(BackupChannel::Lan, true)?;
+                                let path = this
+                                    .services
+                                    .export_backup_to_channel(BackupChannel::WebDav)?;
+                                this.status = format!("Exported WebDAV backup: {}", path.display());
+                                Ok(())
+                            })();
+
+                            if let Err(error) = result {
+                                this.status = format!("export webdav backup failed: {error}");
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(
+                    Self::action_button("☁️ Import WebDAV Backup", 0x6d28d9).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            match this
+                                .services
+                                .import_latest_backup_from_channel(BackupChannel::WebDav)
+                            {
+                                Ok(report) => {
+                                    this.status = format!(
+                                        "Imported WebDAV backup: conversations={} messages={}",
+                                        report.conversations, report.messages
+                                    );
+                                }
+                                Err(error) => {
+                                    this.status = format!("import webdav backup failed: {error}");
+                                }
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(Self::info_box(format!(
+                    "Provider count: {}",
+                    self.services.providers().len()
+                )))
+                .child(Self::info_box(self.markdown_preview(
+                    "# Store\n- Provider templates\n- Assistant presets\n- Versioned artifacts",
+                ))),
+            AppRoute::Paintings => div()
+                .child(Self::section_label("Paintings Actions"))
+                .child(
+                    Self::action_button("🎨 Generate Painting Prompts", 0x7c2d12).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            if let Err(error) =
+                                this.send_quick_prompt("请给我 3 个 Midjourney 风格绘图提示词。")
+                            {
+                                this.status = format!("send drawing prompt failed: {error}");
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(Self::info_box(self.code_preview(
+                    "json",
+                    r#"{"provider":"paintings","style":"cinematic","quality":"high"}"#,
+                )))
+                .child(Self::info_box(self.mermaid_preview(
+                    "flowchart LR\nA[Prompt] --> B[Model]\nB --> C[Image]",
+                ))),
+            AppRoute::Translate => div()
+                .child(Self::section_label("Translate Actions"))
+                .child(
+                    Self::action_button("🌐 Translate Sample", 0x0369a1).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            if let Err(error) = this.send_quick_prompt(
+                                "将下面这句话翻译成英文：我们正在将 Cherry Studio 迁移到 Rust。",
+                            ) {
+                                this.status = format!("send translate prompt failed: {error}");
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(Self::info_box(self.markdown_preview(
+                    "## Translate Preview\n**Input**: 你好世界\n**Output**: Hello, world",
+                ))),
+            AppRoute::Files => div()
+                .child(Self::section_label("Files Actions"))
+                .child(
+                    Self::action_button("➕ Add Sample File", 0x0f766e).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            if let Err(error) = this.services.add_sample_file_entry() {
+                                this.status = format!("add file failed: {error}");
+                            } else {
+                                this.status = "Added sample file".to_owned();
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(
+                    Self::action_button("📤 Upload ./README.md", 0x1d4ed8).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            match this
+                                .services
+                                .upload_local_file("./README.md", "text/markdown")
+                            {
+                                Ok(file) => {
+                                    this.status = format!("Uploaded local file {}", file.name)
+                                }
+                                Err(error) => {
+                                    this.status = format!("upload local file failed: {error}")
+                                }
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(
+                    Self::action_button("☁️ Add WebDAV File", 0x7c3aed).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            match this
+                                .services
+                                .add_sample_channel_file_entry(cherry_core::FileSourceKind::WebDav)
+                            {
+                                Ok(file) => {
+                                    this.status =
+                                        format!("Added remote file from WebDAV {}", file.name)
+                                }
+                                Err(error) => {
+                                    this.status = format!("add webdav file entry failed: {error}")
+                                }
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(
+                    Self::action_button("➖ Remove First File", 0xb91c1c).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            match this.services.remove_first_file_entry() {
+                                Ok(Some(id)) => this.status = format!("Removed file {id}"),
+                                Ok(None) => this.status = "No file to remove".to_owned(),
+                                Err(error) => this.status = format!("remove file failed: {error}"),
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(Self::section_label("Preview"))
+                .child(Self::info_box(self.file_preview()))
+                .child(Self::section_label("Files"))
+                .child(Self::info_box(self.files_text())),
+            AppRoute::Notes => div()
+                .child(Self::section_label("Notes Actions"))
+                .child(
+                    Self::action_button("➕ Add Sample Note", 0x0f766e).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            if let Err(error) = this.services.add_sample_note_entry() {
+                                this.status = format!("add note failed: {error}");
+                            } else {
+                                this.status = "Added sample note".to_owned();
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(
+                    Self::action_button("➖ Remove First Note", 0xb91c1c).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            match this.services.remove_first_note_entry() {
+                                Ok(Some(id)) => this.status = format!("Removed note {id}"),
+                                Ok(None) => this.status = "No note to remove".to_owned(),
+                                Err(error) => this.status = format!("remove note failed: {error}"),
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(Self::section_label("Notes"))
+                .child(Self::info_box(self.notes_text())),
+            AppRoute::Knowledge => div()
+                .child(Self::section_label("Knowledge Actions"))
+                .child(
+                    Self::action_button("➕ Add Knowledge Doc", 0x0f766e).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            if let Err(error) = this.services.add_sample_knowledge_document() {
+                                this.status = format!("add knowledge failed: {error}");
+                            } else {
+                                this.status = "Added knowledge document".to_owned();
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(
+                    Self::action_button("✅ Mark First Indexed", 0x0369a1).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            match this.services.mark_first_knowledge_indexed() {
+                                Ok(Some(doc)) => {
+                                    this.status = format!("Marked indexed: {}", doc.title)
+                                }
+                                Ok(None) => this.status = "No knowledge doc to mark".to_owned(),
+                                Err(error) => this.status = format!("mark indexed failed: {error}"),
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(
+                    Self::action_button("➖ Remove First Knowledge Doc", 0xb91c1c).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            match this.services.remove_first_knowledge_document() {
+                                Ok(Some(id)) => this.status = format!("Removed knowledge {id}"),
+                                Ok(None) => this.status = "No knowledge doc to remove".to_owned(),
+                                Err(error) => {
+                                    this.status = format!("remove knowledge failed: {error}")
+                                }
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(Self::section_label("Knowledge"))
+                .child(Self::info_box(self.knowledge_text())),
+            AppRoute::MiniApps => div()
+                .child(Self::section_label("MiniApps Actions"))
+                .child(
+                    Self::action_button("🧩 Create MiniApp Note", 0x4f46e5).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            if let Err(error) = this.services.add_sample_note_entry() {
+                                this.status = format!("create miniapp note failed: {error}");
+                            } else {
+                                this.status = "Created miniapp config note".to_owned();
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(Self::info_box(self.markdown_preview(
+                    "MiniApp skeleton:\n- metadata\n- entrypoint\n- permissions",
+                ))),
+            AppRoute::CodeTools => div()
+                .child(Self::section_label("CodeTools Actions"))
+                .child(
+                    Self::action_button("🛠 Send Code Review Prompt", 0x0f766e).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            if let Err(error) =
+                                this.send_quick_prompt("请审查以下 Rust 代码并给出改进建议。")
+                            {
+                                this.status = format!("send code review prompt failed: {error}");
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(Self::info_box(self.code_preview(
+                    "rust",
+                    "fn main() {\n    println!(\"hello from code tools\");\n}",
+                ))),
+            AppRoute::OpenClaw => div()
+                .child(Self::section_label("OpenClaw Actions"))
+                .child(
+                    Self::action_button("🦀 Call OpenClaw MCP Bridge", 0x0f766e).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            match this.services.list_mcp_servers() {
+                                Ok(servers) => {
+                                    if let Some(server) = servers.first() {
+                                        match this.services.call_mcp_tool(
+                                            server.id,
+                                            "openclaw_query",
+                                            "{\"query\":\"status\"}",
+                                        ) {
+                                            Ok(result) => {
+                                                this.status = format!(
+                                                    "OpenClaw via MCP {}: {}",
+                                                    result.server_name, result.output
+                                                );
+                                            }
+                                            Err(error) => {
+                                                this.status =
+                                                    format!("openclaw call failed: {error}")
+                                            }
+                                        }
+                                    } else {
+                                        this.status = "No MCP server available".to_owned();
+                                    }
+                                }
+                                Err(error) => this.status = format!("list mcp failed: {error}"),
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(
+                    Self::action_button("🔐 Allow MCP Tools", 0x1d4ed8).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            let result = (|| -> anyhow::Result<()> {
+                                this.services.set_tool_permission("openclaw_query", true)?;
+                                this.services.set_tool_permission("list_files", true)?;
+                                Ok(())
+                            })();
+                            if let Err(error) = result {
+                                this.status = format!("set tool permissions failed: {error}");
+                            } else {
+                                this.status = "Enabled tool permissions: openclaw_query/list_files"
+                                    .to_owned();
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(
+                    Self::action_button("🔗 Register cherry:// Handler", 0x7c3aed).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            if let Err(error) = this.services.add_sample_protocol_handler() {
+                                this.status = format!("add protocol handler failed: {error}");
+                            } else {
+                                this.status = "Protocol handler cherry:// registered".to_owned();
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(
+                    Self::action_button("🧭 Resolve cherry:// URL", 0x6d28d9).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            match this
+                                .services
+                                .resolve_protocol_url("cherry://openclaw?query=status")
+                            {
+                                Ok(command) => {
+                                    this.status = format!("Resolved protocol command: {}", command);
+                                }
+                                Err(error) => {
+                                    this.status = format!("resolve protocol url failed: {error}");
+                                }
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(Self::section_label("MCP Servers"))
+                .child(Self::info_box(self.mcp_text()))
+                .child(Self::section_label("Tool Permissions"))
+                .child(Self::info_box(self.tool_permissions_text()))
+                .child(Self::section_label("Protocol Handlers"))
+                .child(Self::info_box(self.protocol_handlers_text())),
+            AppRoute::Settings => div()
+                .child(Self::section_label("Settings Sections"))
+                .child(Self::info_box(format!(
+                    "Current: {} | {}",
+                    self.settings_section.title(),
+                    self.settings_section_summary()
+                )))
+                .child(
+                    Self::action_button("◀ Previous Section", 0x334155).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            this.settings_section = this.settings_section.previous();
+                            this.status = format!(
+                                "Switched settings section: {}",
+                                this.settings_section.title()
+                            );
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(
+                    Self::action_button("▶ Next Section", 0x334155).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            this.settings_section = this.settings_section.next();
+                            this.status = format!(
+                                "Switched settings section: {}",
+                                this.settings_section.title()
+                            );
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(
+                    Self::action_button("✅ Apply Section Action", 0x0f766e).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            if let Err(error) = this.apply_settings_section_action() {
+                                this.status = format!("apply section action failed: {error}");
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(Self::section_label("MCP Servers"))
+                .child(Self::info_box(self.mcp_text())),
+            AppRoute::Launchpad => div()
+                .child(Self::section_label("Launchpad Actions"))
+                .child(
+                    Self::action_button("🚀 Import From ./legacy-data", 0x0369a1).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            let legacy_dir = PathBuf::from("./legacy-data");
+                            match cherry_services::import_from_legacy_dir(
+                                &this.services,
+                                &legacy_dir,
+                            ) {
+                                Ok(report) => {
+                                    this.status = format!(
+                                        "Legacy dir import done: conv={} msg={}",
+                                        report.conversations, report.messages
+                                    );
+                                }
+                                Err(error) => {
+                                    this.status = format!("legacy dir import failed: {error}");
+                                }
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(
+                    Self::action_button("💾 Export Launchpad Backup", 0x0f766e).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            let backup = PathBuf::from("./data/backup/launchpad-backup.json");
+                            if let Err(error) = this.services.export_backup_json(&backup) {
+                                this.status = format!("launchpad backup failed: {error}");
+                            } else {
+                                this.status =
+                                    format!("Launchpad backup exported: {}", backup.display());
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(
+                    Self::action_button("🌐 Export WebDAV/S3/LAN Backups", 0x7c3aed).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            let result = (|| -> anyhow::Result<()> {
+                                this.services
+                                    .set_backup_channel_enabled(BackupChannel::WebDav, true)?;
+                                this.services
+                                    .set_backup_channel_enabled(BackupChannel::S3, true)?;
+                                this.services
+                                    .set_backup_channel_enabled(BackupChannel::Lan, true)?;
+                                let webdav = this
+                                    .services
+                                    .export_backup_to_channel(BackupChannel::WebDav)?;
+                                let s3 =
+                                    this.services.export_backup_to_channel(BackupChannel::S3)?;
+                                let lan =
+                                    this.services.export_backup_to_channel(BackupChannel::Lan)?;
+                                this.status = format!(
+                                    "Launchpad channel backup exported: webdav={}, s3={}, lan={}",
+                                    webdav.display(),
+                                    s3.display(),
+                                    lan.display()
+                                );
+                                Ok(())
+                            })();
+                            if let Err(error) = result {
+                                this.status = format!("launchpad channel backup failed: {error}");
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(Self::info_box(self.markdown_preview(
+                    "Launchpad modules:\n- migration\n- validation\n- deployment",
+                ))),
+        };
+
+        let route_actions = div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(Self::section_label(format!(
+                "{} Actions",
+                self.route.title()
+            )))
+            .child(route_actions_raw);
+
+        let topbar = div()
+            .h(px(46.))
+            .w_full()
+            .px_3()
+            .flex()
+            .items_center()
+            .justify_between()
+            .bg(rgb(0x111827))
+            .text_color(rgb(0xf8fafc))
+            .border_b_1()
+            .border_color(hsla(0.0, 0.0, 1.0, 0.14))
+            .child(format!("Cherry Studio RS · {}", self.route.title()))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(format!(
+                        "Conversations: {} · Messages: {}",
+                        self.conversations.len(),
+                        self.messages.len()
+                    ))
                     .child(
                         div()
+                            .px_2()
+                            .py_1()
+                            .rounded_sm()
+                            .bg(rgb(0x1d4ed8))
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _event, _window, cx| {
                                     if let Err(error) = this.create_new_conversation() {
-                                        this.status = format!("create conversation failed: {error}");
+                                        this.status =
+                                            format!("create conversation failed: {error}");
                                     }
                                     cx.notify();
                                 }),
                             )
-                            .child("➕ New Conversation"),
+                            .child("New Chat"),
                     )
                     .child(
                         div()
+                            .px_2()
+                            .py_1()
+                            .rounded_sm()
+                            .bg(rgb(0x0f766e))
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _event, _window, cx| {
                                     if let Err(error) =
-                                        this.send_quick_prompt("请总结当前迁移进度并给出下一步计划。")
+                                        this.send_quick_prompt("请总结当前页面状态并给出下一步。")
                                     {
                                         this.status = format!("send prompt failed: {error}");
                                     }
                                     cx.notify();
                                 }),
                             )
-                            .child("▶ Send Progress Prompt"),
+                            .child("Quick Prompt"),
                     )
                     .child(
                         div()
+                            .px_2()
+                            .py_1()
+                            .rounded_sm()
+                            .bg(rgb(0x7c3aed))
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _event, _window, cx| {
                                     if let Err(error) = this.send_quick_prompt_streaming(
-                                        "请以流式方式总结本周迁移进度。",
+                                        "请以流式方式输出 3 条当前页面摘要。",
                                     ) {
                                         this.status = format!("stream prompt failed: {error}");
                                     }
                                     cx.notify();
                                 }),
                             )
-                            .child("⏩ Stream Progress Prompt"),
-                    );
+                            .child("Streaming"),
+                    ),
+            );
 
-                if !self.conversations.is_empty() {
-                    home_actions = home_actions.child("Conversations:");
-                }
-                for conversation in self.conversations.iter().take(10) {
-                    let conversation_id = conversation.id;
-                    let title = conversation.title.clone();
-                    home_actions = home_actions.child(
-                        div()
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _event, _window, cx| {
-                                    this.active_conversation_id = Some(conversation_id);
-                                    if let Err(error) = this.load_messages_for_active() {
-                                        this.status = format!("switch conversation failed: {error}");
-                                    } else {
-                                        this.status = format!("Switched conversation: {title}");
-                                    }
-                                    cx.notify();
-                                }),
-                            )
-                            .child(format!("- {}", conversation.title)),
-                    );
-                }
-                home_actions
-            }
-            AppRoute::Store => div()
-                .child("Store Actions:")
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                if let Err(error) =
-                                    this.services.export_backup_to_channel(BackupChannel::Local)
-                                {
-                                    this.status = format!("export backup failed: {error}");
-                                } else {
-                                    this.status = "Exported local backup".to_owned();
-                                }
-                                cx.notify();
-                            }),
-                        )
-                        .child("📦 Export Backup JSON"),
-                )
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                match this
-                                    .services
-                                    .import_latest_backup_from_channel(BackupChannel::Local)
-                                {
-                                    Ok(report) => {
-                                        this.status = format!(
-                                            "Imported local backup: conversations={} messages={}",
-                                            report.conversations,
-                                            report.messages
-                                        );
-                                    }
-                                    Err(error) => {
-                                        this.status = format!("import backup failed: {error}");
-                                    }
-                                }
-                                cx.notify();
-                            }),
-                        )
-                        .child("📥 Import Backup JSON"),
-                )
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                let result = (|| -> anyhow::Result<()> {
-                                    this.services
-                                        .set_backup_channel_enabled(BackupChannel::WebDav, true)?;
-                                    this.services
-                                        .set_backup_channel_enabled(BackupChannel::S3, true)?;
-                                    this.services
-                                        .set_backup_channel_enabled(BackupChannel::Lan, true)?;
-                                    let path = this
-                                        .services
-                                        .export_backup_to_channel(BackupChannel::WebDav)?;
-                                    this.status = format!("Exported WebDAV backup: {}", path.display());
-                                    Ok(())
-                                })();
+        let overview_card = div()
+            .w_full()
+            .p_3()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .rounded_md()
+            .bg(rgb(0x1e293b))
+            .border_1()
+            .border_color(hsla(0.0, 0.0, 1.0, 0.14))
+            .text_color(rgb(0xf8fafc))
+            .child(self.header_text())
+            .child(self.summary_for_route())
+            .child(self.overview_metrics_panel());
 
-                                if let Err(error) = result {
-                                    this.status = format!("export webdav backup failed: {error}");
-                                }
-                                cx.notify();
-                            }),
-                        )
-                        .child("☁️ Export WebDAV Backup"),
-                )
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                match this
-                                    .services
-                                    .import_latest_backup_from_channel(BackupChannel::WebDav)
-                                {
-                                    Ok(report) => {
-                                        this.status = format!(
-                                            "Imported WebDAV backup: conversations={} messages={}",
-                                            report.conversations,
-                                            report.messages
-                                        );
-                                    }
-                                    Err(error) => {
-                                        this.status =
-                                            format!("import webdav backup failed: {error}");
-                                    }
-                                }
-                                cx.notify();
-                            }),
-                        )
-                        .child("☁️ Import WebDAV Backup"),
-                )
-                .child(format!("Provider count: {}", self.services.providers().len()))
-                .child(self.markdown_preview(
-                    "# Store\n- Provider templates\n- Assistant presets\n- Versioned artifacts",
-                )),
-            AppRoute::Paintings => div()
-                .child("Paintings Actions:")
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                if let Err(error) = this.send_quick_prompt("请给我 3 个 Midjourney 风格绘图提示词。") {
-                                    this.status = format!("send drawing prompt failed: {error}");
-                                }
-                                cx.notify();
-                            }),
-                        )
-                        .child("🎨 Generate Painting Prompts"),
-                )
-                .child(self.code_preview(
-                    "json",
-                    r#"{"provider":"paintings","style":"cinematic","quality":"high"}"#,
-                ))
-                .child(self.mermaid_preview("flowchart LR\nA[Prompt] --> B[Model]\nB --> C[Image]")),
-            AppRoute::Translate => div()
-                .child("Translate Actions:")
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                if let Err(error) = this.send_quick_prompt("将下面这句话翻译成英文：我们正在将 Cherry Studio 迁移到 Rust。") {
-                                    this.status = format!("send translate prompt failed: {error}");
-                                }
-                                cx.notify();
-                            }),
-                        )
-                        .child("🌐 Translate Sample"),
-                )
-                .child(self.markdown_preview("## Translate Preview\n**Input**: 你好世界\n**Output**: Hello, world")),
-            AppRoute::Files => div()
-                .child("Files Actions:")
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                if let Err(error) = this.services.add_sample_file_entry() {
-                                    this.status = format!("add file failed: {error}");
-                                } else {
-                                    this.status = "Added sample file".to_owned();
-                                }
-                                cx.notify();
-                            }),
-                        )
-                        .child("➕ Add Sample File"),
-                )
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                match this.services.upload_local_file("./README.md", "text/markdown")
-                                {
-                                    Ok(file) => {
-                                        this.status = format!("Uploaded local file {}", file.name)
-                                    }
-                                    Err(error) => {
-                                        this.status = format!("upload local file failed: {error}")
-                                    }
-                                }
-                                cx.notify();
-                            }),
-                        )
-                        .child("📤 Upload ./README.md"),
-                )
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                match this
-                                    .services
-                                    .add_sample_channel_file_entry(cherry_core::FileSourceKind::WebDav)
-                                {
-                                    Ok(file) => {
-                                        this.status =
-                                            format!("Added remote file from WebDAV {}", file.name)
-                                    }
-                                    Err(error) => {
-                                        this.status =
-                                            format!("add webdav file entry failed: {error}")
-                                    }
-                                }
-                                cx.notify();
-                            }),
-                        )
-                        .child("☁️ Add WebDAV File"),
-                )
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                match this.services.remove_first_file_entry() {
-                                    Ok(Some(id)) => this.status = format!("Removed file {id}"),
-                                    Ok(None) => this.status = "No file to remove".to_owned(),
-                                    Err(error) => this.status = format!("remove file failed: {error}"),
-                                }
-                                cx.notify();
-                            }),
-                        )
-                        .child("➖ Remove First File"),
-                )
-                .child("Preview:")
-                .child(self.file_preview())
-                .child("Files:")
-                .child(self.files_text()),
-            AppRoute::Notes => div()
-                .child("Notes Actions:")
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                if let Err(error) = this.services.add_sample_note_entry() {
-                                    this.status = format!("add note failed: {error}");
-                                } else {
-                                    this.status = "Added sample note".to_owned();
-                                }
-                                cx.notify();
-                            }),
-                        )
-                        .child("➕ Add Sample Note"),
-                )
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                match this.services.remove_first_note_entry() {
-                                    Ok(Some(id)) => this.status = format!("Removed note {id}"),
-                                    Ok(None) => this.status = "No note to remove".to_owned(),
-                                    Err(error) => this.status = format!("remove note failed: {error}"),
-                                }
-                                cx.notify();
-                            }),
-                        )
-                        .child("➖ Remove First Note"),
-                )
-                .child("Notes:")
-                .child(self.notes_text()),
-            AppRoute::Knowledge => div()
-                .child("Knowledge Actions:")
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                if let Err(error) = this.services.add_sample_knowledge_document() {
-                                    this.status = format!("add knowledge failed: {error}");
-                                } else {
-                                    this.status = "Added knowledge document".to_owned();
-                                }
-                                cx.notify();
-                            }),
-                        )
-                        .child("➕ Add Knowledge Doc"),
-                )
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                match this.services.mark_first_knowledge_indexed() {
-                                    Ok(Some(doc)) => this.status = format!("Marked indexed: {}", doc.title),
-                                    Ok(None) => this.status = "No knowledge doc to mark".to_owned(),
-                                    Err(error) => this.status = format!("mark indexed failed: {error}"),
-                                }
-                                cx.notify();
-                            }),
-                        )
-                        .child("✅ Mark First Indexed"),
-                )
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                match this.services.remove_first_knowledge_document() {
-                                    Ok(Some(id)) => this.status = format!("Removed knowledge {id}"),
-                                    Ok(None) => this.status = "No knowledge doc to remove".to_owned(),
-                                    Err(error) => this.status = format!("remove knowledge failed: {error}"),
-                                }
-                                cx.notify();
-                            }),
-                        )
-                        .child("➖ Remove First Knowledge Doc"),
-                )
-                .child("Knowledge:")
-                .child(self.knowledge_text()),
-            AppRoute::MiniApps => div()
-                .child("MiniApps Actions:")
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                if let Err(error) = this.services.add_sample_note_entry() {
-                                    this.status = format!("create miniapp note failed: {error}");
-                                } else {
-                                    this.status = "Created miniapp config note".to_owned();
-                                }
-                                cx.notify();
-                            }),
-                        )
-                        .child("🧩 Create MiniApp Note"),
-                )
-                .child(self.markdown_preview("MiniApp skeleton:\n- metadata\n- entrypoint\n- permissions")),
-            AppRoute::CodeTools => div()
-                .child("CodeTools Actions:")
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                if let Err(error) = this.send_quick_prompt("请审查以下 Rust 代码并给出改进建议。") {
-                                    this.status = format!("send code review prompt failed: {error}");
-                                }
-                                cx.notify();
-                            }),
-                        )
-                        .child("🛠 Send Code Review Prompt"),
-                )
-                .child(self.code_preview(
-                    "rust",
-                    "fn main() {\n    println!(\"hello from code tools\");\n}",
-                )),
-            AppRoute::OpenClaw => div()
-                .child("OpenClaw Actions:")
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                match this.services.list_mcp_servers() {
-                                    Ok(servers) => {
-                                        if let Some(server) = servers.first() {
-                                            match this.services.call_mcp_tool(
-                                                server.id,
-                                                "openclaw_query",
-                                                "{\"query\":\"status\"}",
-                                            ) {
-                                                Ok(result) => {
-                                                    this.status = format!(
-                                                        "OpenClaw via MCP {}: {}",
-                                                        result.server_name, result.output
-                                                    );
-                                                }
-                                                Err(error) => this.status = format!("openclaw call failed: {error}"),
-                                            }
-                                        } else {
-                                            this.status = "No MCP server available".to_owned();
-                                        }
-                                    }
-                                    Err(error) => this.status = format!("list mcp failed: {error}"),
-                                }
-                                cx.notify();
-                            }),
-                        )
-                        .child("🦀 Call OpenClaw MCP Bridge"),
-                )
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                let result = (|| -> anyhow::Result<()> {
-                                    this.services.set_tool_permission("openclaw_query", true)?;
-                                    this.services.set_tool_permission("list_files", true)?;
-                                    Ok(())
-                                })();
-                                if let Err(error) = result {
-                                    this.status = format!("set tool permissions failed: {error}");
-                                } else {
-                                    this.status =
-                                        "Enabled tool permissions: openclaw_query/list_files"
-                                            .to_owned();
-                                }
-                                cx.notify();
-                            }),
-                        )
-                        .child("🔐 Allow MCP Tools"),
-                )
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                if let Err(error) = this.services.add_sample_protocol_handler() {
-                                    this.status = format!("add protocol handler failed: {error}");
-                                } else {
-                                    this.status = "Protocol handler cherry:// registered".to_owned();
-                                }
-                                cx.notify();
-                            }),
-                        )
-                        .child("🔗 Register cherry:// Handler"),
-                )
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                match this
-                                    .services
-                                    .resolve_protocol_url("cherry://openclaw?query=status")
-                                {
-                                    Ok(command) => {
-                                        this.status =
-                                            format!("Resolved protocol command: {}", command);
-                                    }
-                                    Err(error) => {
-                                        this.status =
-                                            format!("resolve protocol url failed: {error}");
-                                    }
-                                }
-                                cx.notify();
-                            }),
-                        )
-                        .child("🧭 Resolve cherry:// URL"),
-                )
-                .child("MCP Servers:")
-                .child(self.mcp_text())
-                .child("Tool Permissions:")
-                .child(self.tool_permissions_text())
-                .child("Protocol Handlers:")
-                .child(self.protocol_handlers_text()),
-            AppRoute::Settings => div()
-                .child("Settings Sections:")
-                .child(format!(
-                    "Current: {} | {}",
-                    self.settings_section.title(),
-                    self.settings_section_summary()
-                ))
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                this.settings_section = this.settings_section.previous();
-                                this.status = format!(
-                                    "Switched settings section: {}",
-                                    this.settings_section.title()
-                                );
-                                cx.notify();
-                            }),
-                        )
-                        .child("◀ Previous Section"),
-                )
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                this.settings_section = this.settings_section.next();
-                                this.status = format!(
-                                    "Switched settings section: {}",
-                                    this.settings_section.title()
-                                );
-                                cx.notify();
-                            }),
-                        )
-                        .child("▶ Next Section"),
-                )
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                if let Err(error) = this.apply_settings_section_action() {
-                                    this.status = format!("apply section action failed: {error}");
-                                }
-                                cx.notify();
-                            }),
-                        )
-                        .child("✅ Apply Section Action"),
-                )
-                .child("MCP Servers:")
-                .child(self.mcp_text()),
-            AppRoute::Launchpad => div()
-                .child("Launchpad Actions:")
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                let legacy_dir = PathBuf::from("./legacy-data");
-                                match cherry_services::import_from_legacy_dir(&this.services, &legacy_dir) {
-                                    Ok(report) => {
-                                        this.status = format!(
-                                            "Legacy dir import done: conv={} msg={}",
-                                            report.conversations, report.messages
-                                        );
-                                    }
-                                    Err(error) => {
-                                        this.status = format!("legacy dir import failed: {error}");
-                                    }
-                                }
-                                cx.notify();
-                            }),
-                        )
-                        .child("🚀 Import From ./legacy-data"),
-                )
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                let backup = PathBuf::from("./data/backup/launchpad-backup.json");
-                                if let Err(error) = this.services.export_backup_json(&backup) {
-                                    this.status = format!("launchpad backup failed: {error}");
-                                } else {
-                                    this.status = format!("Launchpad backup exported: {}", backup.display());
-                                }
-                                cx.notify();
-                            }),
-                        )
-                        .child("💾 Export Launchpad Backup"),
-                )
-                .child(
-                    div()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                let result = (|| -> anyhow::Result<()> {
-                                    this.services
-                                        .set_backup_channel_enabled(BackupChannel::WebDav, true)?;
-                                    this.services
-                                        .set_backup_channel_enabled(BackupChannel::S3, true)?;
-                                    this.services
-                                        .set_backup_channel_enabled(BackupChannel::Lan, true)?;
-                                    let webdav =
-                                        this.services.export_backup_to_channel(BackupChannel::WebDav)?;
-                                    let s3 = this.services.export_backup_to_channel(BackupChannel::S3)?;
-                                    let lan = this.services.export_backup_to_channel(BackupChannel::Lan)?;
-                                    this.status = format!(
-                                        "Launchpad channel backup exported: webdav={}, s3={}, lan={}",
-                                        webdav.display(),
-                                        s3.display(),
-                                        lan.display()
-                                    );
-                                    Ok(())
-                                })();
-                                if let Err(error) = result {
-                                    this.status = format!("launchpad channel backup failed: {error}");
-                                }
-                                cx.notify();
-                            }),
-                        )
-                        .child("🌐 Export WebDAV/S3/LAN Backups"),
-                )
-                .child(self.markdown_preview(
-                    "Launchpad modules:\n- migration\n- validation\n- deployment",
-                )),
-        };
+        let messages_card = div()
+            .w_full()
+            .p_3()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .rounded_md()
+            .bg(rgb(0x0f172a))
+            .border_1()
+            .border_color(hsla(0.0, 0.0, 1.0, 0.14))
+            .text_color(rgb(0xe2e8f0))
+            .child("Recent Messages")
+            .child(self.messages_bubble_panel())
+            .child("Streaming Preview")
+            .child(self.streaming_chip_panel());
 
-        let content = div()
-            .id("content")
+        let actions_card = div()
+            .id("actions-card-scroll")
+            .w_full()
+            .h_full()
+            .overflow_y_scroll()
+            .p_3()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .rounded_md()
+            .bg(rgb(0x0f172a))
+            .border_1()
+            .border_color(hsla(0.0, 0.0, 1.0, 0.14))
+            .text_color(rgb(0xe2e8f0))
+            .whitespace_normal()
+            .child(route_actions);
+
+        let left_column = div()
+            .id("left-column-scroll")
+            .w_full()
             .flex()
             .flex_col()
             .flex_1()
             .h_full()
             .overflow_y_scroll()
+            .gap_2()
+            .child(overview_card)
+            .child(messages_card);
+
+        let right_column = div().w(px(430.)).h_full().child(actions_card);
+
+        let content = div()
+            .id("content")
+            .flex()
+            .flex_1()
+            .h_full()
             .p_3()
             .gap_2()
-            .bg(rgb(0x0f172a))
+            .bg(rgb(0x0b1220))
             .text_color(rgb(0xe2e8f0))
             .whitespace_normal()
-            .child(self.header_text())
-            .child(self.summary_for_route())
-            .child("Recent Messages:")
-            .child(self.messages_text())
-            .child("Streaming Preview:")
-            .child(self.streaming_preview_text())
-            .child(route_actions);
+            .child(left_column)
+            .child(right_column);
+
+        let main_body = div().flex().flex_1().h_full().child(sidebar).child(content);
 
         div()
             .size_full()
             .flex()
-            .bg(rgb(0x0b1120))
+            .flex_col()
+            .bg(rgb(0x020617))
             .text_sm()
             .tab_index(0)
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
@@ -1367,8 +1601,8 @@ impl Render for CherryAppView {
                     cx.notify();
                 }
             }))
-            .child(sidebar)
-            .child(content)
+            .child(topbar)
+            .child(main_body)
     }
 }
 
