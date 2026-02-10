@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "types": ["vite/client"],
+    "paths": {
+      "@logger": ["./src/renderer/src/services/LoggerService"],
+      "@renderer/*": ["./src/renderer/src/*"],
+      "@shared/*": ["./packages/shared/*"],
+      "@types": ["./src/renderer/src/types/index.ts"],
+      "@mcp-trace/*": ["./packages/mcp-trace/*"],
+      "@cherrystudio/ai-core/provider": ["./packages/aiCore/src/core/providers/index.ts"],
+      "@cherrystudio/ai-core/built-in/plugins": ["./packages/aiCore/src/core/plugins/built-in/index.ts"],
+      "@cherrystudio/ai-core/*": ["./packages/aiCore/src/*"],
+      "@cherrystudio/ai-core": ["./packages/aiCore/src/index.ts"],
+      "@cherrystudio/extension-table-plus": ["./packages/extension-table-plus/src/index.ts"],
+      "@cherrystudio/ai-sdk-provider": ["./packages/ai-sdk-provider/src/index.ts"]
+    }
+  }
+}
+

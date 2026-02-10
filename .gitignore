@@ -1,0 +1,23 @@
+# Source reference repo (not committed)
+cherry-studio/
+
+# Node / Vite
+node_modules/
+dist/
+.vite/
+.turbo/
+.cache/
+*.log
+
+# TypeScript
+*.tsbuildinfo
+.tsbuildinfo/
+
+# Tauri / Rust
+src-tauri/target/
+target/
+
+# OS
+.DS_Store
+Thumbs.db
+
