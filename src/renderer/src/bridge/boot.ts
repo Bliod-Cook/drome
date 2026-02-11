@@ -1,5 +1,29 @@
 const isTauri = typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__ != null
 
+function createNotImplementedProxy(path: string[]): any {
+  const name = `window.api.${path.join('.')}`
+  const fn = (..._args: any[]) => Promise.reject(new Error(`Not implemented: ${name}`))
+  return new Proxy(fn as any, {
+    get(_target, prop) {
+      if (prop === 'then' || prop === 'catch' || prop === 'finally') return undefined
+      if (prop === Symbol.toStringTag) return 'NotImplemented'
+      return createNotImplementedProxy([...path, String(prop)])
+    },
+    apply(_target, _thisArg, _args) {
+      return Promise.reject(new Error(`Not implemented: ${name}`))
+    }
+  })
+}
+
+function createApiProxy<T extends object>(api: T): T {
+  return new Proxy(api as any, {
+    get(target, prop, receiver) {
+      if (prop in target) return Reflect.get(target, prop, receiver)
+      return createNotImplementedProxy([String(prop)])
+    }
+  })
+}
+
 async function init() {
   if (!window.electron) {
     window.electron = { ipcRenderer: null as any, process: { env: {} } }
@@ -28,7 +52,7 @@ async function init() {
     })
 
     window.electron.ipcRenderer = ipcRenderer as any
-    window.api = createWindowApi({ invoke: ipcRenderer.invoke.bind(ipcRenderer) })
+    window.api = createApiProxy(createWindowApi({ invoke: ipcRenderer.invoke.bind(ipcRenderer) }))
     return
   }
 
@@ -61,10 +85,9 @@ async function init() {
   })
 
   window.electron.ipcRenderer = ipcRenderer as any
-  window.api = createWindowApi({ invoke: ipcRenderer.invoke.bind(ipcRenderer) })
+  window.api = createApiProxy(createWindowApi({ invoke: ipcRenderer.invoke.bind(ipcRenderer) }))
 
   ;(window as any).__DROME_EMIT__ = emit
 }
 
 void init()
-

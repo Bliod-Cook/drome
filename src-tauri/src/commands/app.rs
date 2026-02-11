@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager, State, WebviewWindow};
+use std::process::Command;
+use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 use tauri_plugin_shell::open::open;
 
 use crate::error::{DromeError, Result};
@@ -27,6 +28,42 @@ pub struct AppInfo {
 
 fn ensure_dir(path: &PathBuf) -> Result<()> {
   std::fs::create_dir_all(path)?;
+  Ok(())
+}
+
+fn strip_file_scheme(input: &str) -> &str {
+  input.strip_prefix("file://").unwrap_or(input)
+}
+
+fn normalize_path(path: &str) -> PathBuf {
+  let path = strip_file_scheme(path);
+  if let Some(rest) = path.strip_prefix("~/") {
+    if let Some(home) = dirs::home_dir() {
+      return home.join(rest);
+    }
+  }
+  PathBuf::from(path)
+}
+
+fn store_path(state: &State<'_, AppState>) -> PathBuf {
+  state.app_config_dir.join("store.json")
+}
+
+fn read_store(path: &PathBuf) -> Result<serde_json::Map<String, Value>> {
+  if !path.exists() {
+    return Ok(serde_json::Map::new());
+  }
+  let content = std::fs::read_to_string(path)?;
+  let value: Value = serde_json::from_str(&content)?;
+  Ok(value.as_object().cloned().unwrap_or_default())
+}
+
+fn write_store(path: &PathBuf, map: &serde_json::Map<String, Value>) -> Result<()> {
+  if let Some(parent) = path.parent() {
+    std::fs::create_dir_all(parent)?;
+  }
+  let content = serde_json::to_string_pretty(map)?;
+  std::fs::write(path, content)?;
   Ok(())
 }
 
@@ -121,6 +158,214 @@ pub fn app_get_disk_info(directory_path: String) -> Result<Option<serde_json::Va
 }
 
 pub fn app_get_data_path_from_args() -> Result<Option<String>> {
-  // TODO: parse CLI args for a future data-dir override.
+  for arg in std::env::args() {
+    if let Some(rest) = arg.strip_prefix("--new-data-path=") {
+      if !rest.trim().is_empty() {
+        return Ok(Some(rest.to_string()));
+      }
+    }
+  }
   Ok(None)
+}
+
+pub fn app_select(app: &AppHandle, state: &State<'_, AppState>, options: Option<Value>) -> Result<Option<String>> {
+  let props: Vec<String> = options
+    .as_ref()
+    .and_then(|v| v.get("properties"))
+    .and_then(|v| v.as_array())
+    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+    .unwrap_or_default();
+
+  let title = options
+    .as_ref()
+    .and_then(|v| v.get("title"))
+    .and_then(|v| v.as_str())
+    .map(|s| s.to_string());
+
+  let default_path = options
+    .as_ref()
+    .and_then(|v| v.get("defaultPath"))
+    .and_then(|v| v.as_str())
+    .map(|s| normalize_path(s));
+
+  let can_create = props.iter().any(|p| p == "createDirectory");
+  let open_dir = props.iter().any(|p| p == "openDirectory");
+
+  let mut dialog = tauri_plugin_dialog::DialogExt::dialog(app).file();
+  if let Some(t) = title {
+    dialog = dialog.set_title(t);
+  }
+  if let Some(dir) = default_path {
+    dialog = dialog.set_directory(dir);
+  }
+  if can_create {
+    dialog = dialog.set_can_create_directories(true);
+  }
+
+  #[cfg(desktop)]
+  let selected = if open_dir {
+    dialog.blocking_pick_folder()
+  } else {
+    dialog.blocking_pick_file()
+  };
+
+  #[cfg(not(desktop))]
+  let selected = dialog.blocking_pick_file();
+
+  let path = match selected {
+    Some(p) => p.into_path().map_err(|e| DromeError::Message(e.to_string()))?,
+    None => return Ok(None),
+  };
+
+  // Allow accessing the selected directory for subsequent operations.
+  if let Ok(mut dirs) = state.allowed_dirs.lock() {
+    let allowed = if path.is_dir() { path.clone() } else { path.parent().unwrap_or(&path).to_path_buf() };
+    if !dirs.iter().any(|d| d == &allowed) {
+      dirs.push(allowed);
+    }
+  }
+
+  Ok(Some(path.to_string_lossy().to_string()))
+}
+
+pub fn app_is_not_empty_dir(path: String) -> Result<bool> {
+  let path = normalize_path(&path);
+  if !path.exists() || !path.is_dir() {
+    return Ok(false);
+  }
+  Ok(path.read_dir()?.next().is_some())
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyResult {
+  pub success: bool,
+  pub error: Option<String>,
+}
+
+fn is_inside_any(path: &std::path::Path, excluded: &[PathBuf]) -> bool {
+  excluded.iter().any(|ex| path.starts_with(ex))
+}
+
+fn emit_copy_percent(window: &WebviewWindow, percent: u32) {
+  let _ = window.emit("directory-processing-percent", serde_json::json!({ "percent": percent }));
+}
+
+pub fn app_copy(
+  window: &WebviewWindow,
+  old_path: String,
+  new_path: String,
+  occupied_dirs: Vec<String>,
+) -> Result<CopyResult> {
+  let old_dir = normalize_path(&old_path);
+  let new_dir = normalize_path(&new_path);
+
+  if !old_dir.exists() || !old_dir.is_dir() {
+    return Ok(CopyResult {
+      success: false,
+      error: Some("Original path is not a directory".into()),
+    });
+  }
+
+  std::fs::create_dir_all(&new_dir)?;
+
+  let excluded: Vec<PathBuf> = occupied_dirs.into_iter().map(|p| normalize_path(&p)).collect();
+
+  // Count first (avoid storing huge entry lists in memory).
+  let mut total: u64 = 0;
+  for entry in walkdir::WalkDir::new(&old_dir).follow_links(false).into_iter().filter_map(|e| e.ok()) {
+    let p = entry.path();
+    if is_inside_any(p, &excluded) {
+      continue;
+    }
+    total += 1;
+  }
+  if total == 0 {
+    total = 1;
+  }
+
+  let mut idx: u64 = 0;
+  emit_copy_percent(window, 0);
+  for entry in walkdir::WalkDir::new(&old_dir).follow_links(false).into_iter().filter_map(|e| e.ok()) {
+    let src = entry.path();
+    if is_inside_any(src, &excluded) {
+      continue;
+    }
+
+    let rel = src.strip_prefix(&old_dir).unwrap_or(src);
+    let dest = new_dir.join(rel);
+
+    if entry.file_type().is_dir() {
+      std::fs::create_dir_all(&dest)?;
+    } else if entry.file_type().is_file() {
+      if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)?;
+      }
+      std::fs::copy(src, &dest)?;
+    }
+
+    idx += 1;
+    if idx % 50 == 0 {
+      let percent = ((idx * 100) / total) as u32;
+      emit_copy_percent(window, percent.min(99));
+    }
+  }
+  emit_copy_percent(window, 100);
+
+  Ok(CopyResult { success: true, error: None })
+}
+
+pub fn app_set_app_data_path(state: &State<'_, AppState>, new_path: String) -> Result<()> {
+  let new_dir = normalize_path(&new_path);
+  std::fs::create_dir_all(&new_dir)?;
+  std::fs::create_dir_all(new_dir.join("Data").join("Files"))?;
+  std::fs::create_dir_all(new_dir.join("Data").join("Notes"))?;
+
+  let path = store_path(state);
+  let mut map = read_store(&path)?;
+  map.insert("appDataPath".into(), Value::String(new_dir.to_string_lossy().to_string()));
+  write_store(&path, &map)?;
+
+  Ok(())
+}
+
+pub fn app_set_stop_quit_app(state: &State<'_, AppState>, stop: bool, reason: String) -> Result<()> {
+  if let Ok(mut s) = state.stop_quit.lock() {
+    s.enabled = stop;
+    s.reason = reason;
+  }
+  Ok(())
+}
+
+pub fn app_flush_app_data(app: &AppHandle) -> Result<()> {
+  // Best-effort: ask renderer to persist redux/db state.
+  let _ = app.emit("app:save-data", serde_json::json!({}));
+  Ok(())
+}
+
+pub fn app_relaunch_app(app: &AppHandle, options: Option<Value>) -> Result<()> {
+  let extra_args: Vec<String> = options
+    .as_ref()
+    .and_then(|v| v.get("args"))
+    .and_then(|v| v.as_array())
+    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+    .unwrap_or_default();
+
+  let mut args_os: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+
+  // Remove migration-only args to avoid loops.
+  args_os.retain(|a| {
+    let s = a.to_string_lossy();
+    !s.starts_with("--new-data-path=")
+  });
+
+  for a in extra_args {
+    args_os.push(std::ffi::OsString::from(a));
+  }
+
+  let binary = tauri::process::current_binary(&app.env())?;
+  Command::new(binary).args(args_os).spawn()?;
+
+  app.exit(0);
+  Ok(())
 }

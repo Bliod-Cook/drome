@@ -36,6 +36,24 @@ pub async fn ipc_invoke(
       "app:log-to-main" => to_value(commands::app::app_log_to_main(args)?),
       "app:get-disk-info" => to_value(commands::app::app_get_disk_info(arg::<String>(&args, 0)?)?),
       "app:get-data-path-from-args" => to_value(commands::app::app_get_data_path_from_args()?),
+      "app:select" => to_value(commands::app::app_select(&app, &state, args.get(0).cloned())?),
+      "app:is-not-empty-dir" => to_value(commands::app::app_is_not_empty_dir(arg::<String>(&args, 0)?)?),
+      "app:copy" => to_value(commands::app::app_copy(
+        &window,
+        arg::<String>(&args, 0)?,
+        arg::<String>(&args, 1)?,
+        args.get(2)
+          .and_then(|v| serde_json::from_value::<Vec<String>>(v.clone()).ok())
+          .unwrap_or_default(),
+      )?),
+      "app:set-stop-quit-app" => to_value(commands::app::app_set_stop_quit_app(
+        &state,
+        arg::<bool>(&args, 0)?,
+        arg::<String>(&args, 1)?,
+      )?),
+      "app:flush-app-data" => to_value(commands::app::app_flush_app_data(&app)?),
+      "app:set-app-data-path" => to_value(commands::app::app_set_app_data_path(&state, arg::<String>(&args, 0)?)?),
+      "app:relaunch-app" => to_value(commands::app::app_relaunch_app(&app, args.get(0).cloned())?),
       "redux-store-ready" => Ok(Value::Null),
 
       // Window controls
