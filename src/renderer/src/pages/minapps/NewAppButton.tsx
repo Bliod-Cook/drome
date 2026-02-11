@@ -1,6 +1,6 @@
 import { PlusOutlined, UploadOutlined } from '@ant-design/icons'
 import { loggerService } from '@logger'
-import { loadCustomMiniApp, ORIGIN_DEFAULT_MIN_APPS, updateAllMinApps } from '@renderer/config/minapps'
+import { getCustomMinAppsFilePath, loadCustomMiniApp, ORIGIN_DEFAULT_MIN_APPS, updateAllMinApps } from '@renderer/config/minapps'
 import { useMinapps } from '@renderer/hooks/useMinapps'
 import type { MinAppType } from '@renderer/types'
 import { Button, Form, Input, Modal, Radio, Upload } from 'antd'
@@ -32,7 +32,8 @@ const NewAppButton: FC<Props> = ({ size = 60 }) => {
 
   const handleAddCustomApp = async (values: any) => {
     try {
-      const content = await window.api.file.read('custom-minapps.json')
+      const filePath = await getCustomMinAppsFilePath()
+      const content = await window.api.file.read(filePath)
       const customApps = JSON.parse(content)
 
       // Check for duplicate ID
@@ -54,7 +55,7 @@ const NewAppButton: FC<Props> = ({ size = 60 }) => {
         addTime: new Date().toISOString()
       }
       customApps.push(newApp)
-      await window.api.file.writeWithId('custom-minapps.json', JSON.stringify(customApps, null, 2))
+      await window.api.file.write(filePath, JSON.stringify(customApps, null, 2))
       window.toast.success(t('settings.miniapps.custom.save_success'))
       setIsModalVisible(false)
       form.resetFields()

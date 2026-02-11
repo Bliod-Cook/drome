@@ -1,5 +1,5 @@
 import type Anthropic from '@anthropic-ai/sdk'
-import AnthropicVertex from '@anthropic-ai/vertex-sdk'
+import type AnthropicVertex from '@anthropic-ai/vertex-sdk'
 import { loggerService } from '@logger'
 import { getVertexAILocation, getVertexAIProjectId, getVertexAIServiceAccount } from '@renderer/hooks/useVertexAI'
 import type { Provider } from '@renderer/types'
@@ -48,14 +48,29 @@ export class AnthropicVertexClient extends AnthropicAPIClient {
     }
 
     const authHeaders = await this.getServiceAccountAuthHeaders()
+    const authValue =
+      authHeaders?.Authorization ||
+      // Some libraries normalize to lowercase
+      (authHeaders as any)?.authorization
+    const accessToken = typeof authValue === 'string' ? authValue.replace(/^Bearer\\s+/i, '').trim() : null
+
+    const g = globalThis as any
+    if (typeof g.process === 'undefined') {
+      g.process = { env: {} }
+    } else if (typeof g.process.env === 'undefined') {
+      g.process.env = {}
+    }
+
+    const { default: AnthropicVertex } = await import('@anthropic-ai/vertex-sdk')
 
     this.sdkInstance = new AnthropicVertex({
       projectId: projectId,
       region: location,
+      accessToken,
       dangerouslyAllowBrowser: true,
       defaultHeaders: authHeaders,
       baseURL: isEmpty(this.getBaseURL()) ? undefined : this.getBaseURL()
-    })
+    }) as AnthropicVertex
 
     return this.sdkInstance
   }

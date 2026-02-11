@@ -56,20 +56,39 @@ import GroqProviderLogo from '@renderer/assets/images/providers/groq.png?url'
 import OpenAiProviderLogo from '@renderer/assets/images/providers/openai.png?url'
 import SiliconFlowProviderLogo from '@renderer/assets/images/providers/silicon.png?url'
 import ZhipuProviderLogo from '@renderer/assets/images/providers/zhipu.png?url'
-import type { MinAppType } from '@renderer/types'
+import type { AppInfo, MinAppType } from '@renderer/types'
 
 const logger = loggerService.withContext('Config:minapps')
+
+const CUSTOM_MINAPPS_FILE_NAME = 'custom-minapps.json'
+let customMinAppsFilePath: string | undefined
+
+export async function getCustomMinAppsFilePath(): Promise<string> {
+  if (customMinAppsFilePath) {
+    return customMinAppsFilePath
+  }
+
+  const appInfo: AppInfo = await window.api.getAppInfo()
+  if (!appInfo?.appDataPath) {
+    throw new Error('App data path is not available')
+  }
+
+  const base = appInfo.appDataPath.replace(/[/\\]$/, '')
+  customMinAppsFilePath = `${base}/${CUSTOM_MINAPPS_FILE_NAME}`
+  return customMinAppsFilePath
+}
 
 // 加载自定义小应用
 const loadCustomMiniApp = async (): Promise<MinAppType[]> => {
   try {
     let content: string
+    const filePath = await getCustomMinAppsFilePath()
     try {
-      content = await window.api.file.read('custom-minapps.json')
+      content = await window.api.file.read(filePath)
     } catch (error) {
       // 如果文件不存在，创建一个空的 JSON 数组
       content = '[]'
-      await window.api.file.writeWithId('custom-minapps.json', content)
+      await window.api.file.write(filePath, content)
     }
 
     const customApps = JSON.parse(content)
