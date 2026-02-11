@@ -5,6 +5,15 @@ export function createWindowApi(ipcRenderer: { invoke: (channel: string, ...args
     throw new Error(`Not implemented: window.api.${name}`)
   }
 
+  const safeInvoke = async <T>(channel: string, fallback: T, ...args: any[]): Promise<T> => {
+    try {
+      const result = await ipcRenderer.invoke(channel, ...args)
+      return (result ?? fallback) as T
+    } catch {
+      return fallback
+    }
+  }
+
   return {
     __invoke: (channel: string, ...args: any[]) => ipcRenderer.invoke(channel, ...args),
 
@@ -27,6 +36,9 @@ export function createWindowApi(ipcRenderer: { invoke: (channel: string, ...args
     setStopQuitApp: (stop: boolean, reason: string) => ipcRenderer.invoke(IpcChannel.App_SetStopQuitApp, stop, reason),
     flushAppData: () => ipcRenderer.invoke(IpcChannel.App_FlushAppData),
     setAppDataPath: (path: string) => ipcRenderer.invoke(IpcChannel.App_SetAppDataPath, path),
+
+    setFullScreen: (value: boolean) => safeInvoke(IpcChannel.App_SetFullScreen, undefined, value),
+    isFullScreen: () => safeInvoke(IpcChannel.App_IsFullScreen, false),
 
     setProxy: async (_proxy: string | undefined, _bypassRules?: string) => {},
     checkForUpdate: async () => ({ updateInfo: null }),
@@ -58,6 +70,10 @@ export function createWindowApi(ipcRenderer: { invoke: (channel: string, ...args
         )
         return () => remove?.()
       }
+    },
+
+    notification: {
+      send: (notification: any) => safeInvoke(IpcChannel.Notification_Send, undefined, notification)
     },
 
     window: {
@@ -99,6 +115,56 @@ export function createWindowApi(ipcRenderer: { invoke: (channel: string, ...args
     zip: {
       compress: (text: string) => ipcRenderer.invoke(IpcChannel.Zip_Compress, text),
       decompress: (bytes: any) => ipcRenderer.invoke(IpcChannel.Zip_Decompress, bytes)
+    },
+
+    ovms: {
+      isSupported: () => safeInvoke(IpcChannel.Ovms_IsSupported, false),
+      addModel: (modelName: string, modelId: string, modelSource: string, task: string) =>
+        safeInvoke(IpcChannel.Ovms_AddModel, undefined, modelName, modelId, modelSource, task),
+      stopAddModel: () => safeInvoke(IpcChannel.Ovms_StopAddModel, undefined),
+      getModels: () => safeInvoke(IpcChannel.Ovms_GetModels, []),
+      isRunning: () => safeInvoke(IpcChannel.Ovms_IsRunning, false),
+      getStatus: () => safeInvoke(IpcChannel.Ovms_GetStatus, null),
+      runOvms: () => safeInvoke(IpcChannel.Ovms_RunOVMS, undefined),
+      stopOvms: () => safeInvoke(IpcChannel.Ovms_StopOVMS, undefined)
+    },
+
+    storeSync: {
+      subscribe: () => safeInvoke(IpcChannel.StoreSync_Subscribe, undefined),
+      unsubscribe: () => safeInvoke(IpcChannel.StoreSync_Unsubscribe, undefined),
+      onUpdate: (action: any) => safeInvoke(IpcChannel.StoreSync_OnUpdate, undefined, action)
+    },
+
+    apiServer: {
+      start: () => safeInvoke(IpcChannel.ApiServer_Start, { success: false, error: 'Not supported' }),
+      stop: () => safeInvoke(IpcChannel.ApiServer_Stop, { success: false, error: 'Not supported' }),
+      restart: () => safeInvoke(IpcChannel.ApiServer_Restart, { success: false, error: 'Not supported' }),
+      getStatus: () => safeInvoke(IpcChannel.ApiServer_GetStatus, { running: false, config: null }),
+      onReady: (callback: () => void) => {
+        const remove = window.electron?.ipcRenderer?.on(IpcChannel.ApiServer_Ready, () => callback())
+        return () => {
+          if (typeof remove === 'function') {
+            remove()
+          }
+        }
+      }
+    },
+
+    memory: {
+      add: (messages: any, options: any) => safeInvoke(IpcChannel.Memory_Add, { memories: [], count: 0 }, messages, options),
+      search: (query: string, options: any) =>
+        safeInvoke(IpcChannel.Memory_Search, { memories: [], count: 0 }, query, options),
+      list: (options: any) => safeInvoke(IpcChannel.Memory_List, { memories: [], count: 0 }, options),
+      delete: (id: string) => safeInvoke(IpcChannel.Memory_Delete, undefined, id),
+      update: (id: string, memory: string, metadata?: Record<string, any>) =>
+        safeInvoke(IpcChannel.Memory_Update, undefined, id, memory, metadata),
+      get: (id: string) => safeInvoke(IpcChannel.Memory_Get, [], id),
+      setConfig: (config: any) => safeInvoke(IpcChannel.Memory_SetConfig, undefined, config),
+      deleteUser: (userId: string) => safeInvoke(IpcChannel.Memory_DeleteUser, undefined, userId),
+      deleteAllMemoriesForUser: (userId: string) =>
+        safeInvoke(IpcChannel.Memory_DeleteAllMemoriesForUser, undefined, userId),
+      getUsersList: () => safeInvoke(IpcChannel.Memory_GetUsersList, []),
+      migrateMemoryDb: () => safeInvoke(IpcChannel.Memory_MigrateMemoryDb, undefined)
     },
 
     backup: {

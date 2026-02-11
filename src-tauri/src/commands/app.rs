@@ -141,20 +141,10 @@ pub fn app_get_disk_info(directory_path: String) -> Result<Option<serde_json::Va
     return Ok(None);
   }
 
-  #[cfg(unix)]
-  {
-    use std::os::unix::fs::MetadataExt;
-    let meta = std::fs::metadata(&path)?;
-    let size = meta.size();
-    // Free space is non-trivial cross-platform without extra deps; return null for free for now.
-    return Ok(Some(serde_json::json!({ "size": size, "free": 0 })));
-  }
+  let size = fs2::total_space(&path).map_err(|e| DromeError::Message(e.to_string()))?;
+  let free = fs2::available_space(&path).map_err(|e| DromeError::Message(e.to_string()))?;
 
-  #[cfg(not(unix))]
-  {
-    let meta = std::fs::metadata(&path)?;
-    return Ok(Some(serde_json::json!({ "size": meta.len(), "free": 0 })));
-  }
+  Ok(Some(serde_json::json!({ "size": size, "free": free })))
 }
 
 pub fn app_get_data_path_from_args() -> Result<Option<String>> {
@@ -368,4 +358,14 @@ pub fn app_relaunch_app(app: &AppHandle, options: Option<Value>) -> Result<()> {
 
   app.exit(0);
   Ok(())
+}
+
+pub fn app_set_full_screen(window: &WebviewWindow, value: bool) -> Result<()> {
+  window.set_fullscreen(value).map_err(|e| DromeError::Message(e.to_string()))?;
+  let _ = window.emit("fullscreen-status-changed", value);
+  Ok(())
+}
+
+pub fn app_is_full_screen(window: &WebviewWindow) -> Result<bool> {
+  window.is_fullscreen().map_err(|e| DromeError::Message(e.to_string()))
 }

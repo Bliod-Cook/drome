@@ -54,7 +54,17 @@ pub async fn ipc_invoke(
       "app:flush-app-data" => to_value(commands::app::app_flush_app_data(&app)?),
       "app:set-app-data-path" => to_value(commands::app::app_set_app_data_path(&state, arg::<String>(&args, 0)?)?),
       "app:relaunch-app" => to_value(commands::app::app_relaunch_app(&app, args.get(0).cloned())?),
+      "app:set-full-screen" => to_value(commands::app::app_set_full_screen(&window, arg::<bool>(&args, 0)?)?),
+      "app:is-full-screen" => to_value(commands::app::app_is_full_screen(&window)?),
       "redux-store-ready" => Ok(Value::Null),
+
+      // Store Sync
+      "store-sync:subscribe" => Ok(Value::Null),
+      "store-sync:unsubscribe" => Ok(Value::Null),
+      "store-sync:on-update" => {
+        commands::store_sync::store_sync_on_update(&app, &window, arg::<Value>(&args, 0)?)?;
+        Ok(Value::Null)
+      }
 
       // Window controls
       "window:minimize" => to_value(commands::window::window_minimize(&window)?),

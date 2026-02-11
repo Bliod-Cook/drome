@@ -5,5 +5,6 @@ pub mod file;
 pub mod fs;
 pub mod ipc;
 pub mod migration;
+pub mod store_sync;
 pub mod window;
 pub mod zip;

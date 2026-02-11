@@ -1,7 +1,6 @@
 import { loggerService } from '@logger'
 import type { AppInfo } from '@renderer/types'
 import { GB, MB } from '@shared/config/constant'
-import { notification } from 'antd'
 import { t } from 'i18next'
 
 const logger = loggerService.withContext('useDataLimit')
@@ -11,6 +10,27 @@ const CHECK_INTERVAL_WARNING = 1000 * 60 * 1 // 1 minute when warning is active
 
 let currentInterval: NodeJS.Timeout | null = null
 let diskWarningNotificationKey: string | null = null
+
+function showDiskWarning(key: string) {
+  if (window.toast?.warning) {
+    window.toast.warning({
+      title: t('settings.data.limit.appDataDiskQuota'),
+      description: t('settings.data.limit.appDataDiskQuotaDescription'),
+      timeout: 0,
+      key
+    })
+    return
+  }
+
+  logger.warn('Toast API not ready; skipping disk warning UI')
+}
+
+function hideDiskWarning(key: string) {
+  if (window.toast?.closeToast) {
+    window.toast.closeToast(key)
+    return
+  }
+}
 
 async function checkAppStorageQuota() {
   try {
@@ -67,12 +87,7 @@ export async function checkDataLimit() {
     // Show or hide notification based on warning state
     if (shouldShowWarning && !diskWarningNotificationKey) {
       const key = `disk-warning-${Date.now()}`
-      notification.warning({
-        message: t('settings.data.limit.appDataDiskQuota'),
-        description: t('settings.data.limit.appDataDiskQuotaDescription'),
-        duration: 0,
-        key
-      })
+      showDiskWarning(key)
       diskWarningNotificationKey = key
 
       // Switch to warning mode with shorter interval
@@ -83,7 +98,7 @@ export async function checkDataLimit() {
       currentInterval = setInterval(check, CHECK_INTERVAL_WARNING)
     } else if (!shouldShowWarning && diskWarningNotificationKey) {
       // Dismiss notification when space is recovered
-      notification.destroy(diskWarningNotificationKey)
+      hideDiskWarning(diskWarningNotificationKey)
       diskWarningNotificationKey = null
 
       // Switch back to normal mode
@@ -95,8 +110,8 @@ export async function checkDataLimit() {
     }
   }
 
-  // Initial check
-  check()
+  // Initial check (delay so that window.toast is ready)
+  setTimeout(() => void check(), 0)
 
   // Set up initial interval (normal mode)
   if (!currentInterval) {
