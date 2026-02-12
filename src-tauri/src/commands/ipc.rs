@@ -642,6 +642,102 @@ pub async fn ipc_invoke(
 
             // MCP
             "mcp:get-install-info" => to_value(commands::mcp::mcp_get_install_info()?),
+            "mcp:remove-server" => {
+                let server = arg::<commands::mcp::McpServer>(&args, 0)?;
+                to_value(tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(commands::mcp::mcp_remove_server(&app, server))
+                })?)
+            }
+            "mcp:restart-server" => {
+                let server = arg::<commands::mcp::McpServer>(&args, 0)?;
+                to_value(tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(commands::mcp::mcp_restart_server(&app, server))
+                })?)
+            }
+            "mcp:stop-server" => {
+                let server = arg::<commands::mcp::McpServer>(&args, 0)?;
+                to_value(tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(commands::mcp::mcp_stop_server(&app, server))
+                })?)
+            }
+            "mcp:list-tools" => {
+                let server = arg::<commands::mcp::McpServer>(&args, 0)?;
+                to_value(tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(commands::mcp::mcp_list_tools(&app, server))
+                })?)
+            }
+            "mcp:call-tool" => {
+                let call_args = arg::<commands::mcp::McpCallToolArgs>(&args, 0)?;
+                to_value(tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(commands::mcp::mcp_call_tool(&app, call_args))
+                })?)
+            }
+            "mcp:list-prompts" => {
+                let server = arg::<commands::mcp::McpServer>(&args, 0)?;
+                to_value(tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(commands::mcp::mcp_list_prompts(&app, server))
+                })?)
+            }
+            "mcp:get-prompt" => {
+                let get_args = arg::<commands::mcp::McpGetPromptArgs>(&args, 0)?;
+                to_value(tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(commands::mcp::mcp_get_prompt(&app, get_args))
+                })?)
+            }
+            "mcp:list-resources" => {
+                let server = arg::<commands::mcp::McpServer>(&args, 0)?;
+                to_value(tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(commands::mcp::mcp_list_resources(&app, server))
+                })?)
+            }
+            "mcp:get-resource" => {
+                let get_args = arg::<commands::mcp::McpGetResourceArgs>(&args, 0)?;
+                to_value(tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(commands::mcp::mcp_get_resource(&app, get_args))
+                })?)
+            }
+            "mcp:check-connectivity" => {
+                let server = arg::<commands::mcp::McpServer>(&args, 0)?;
+                to_value(tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(commands::mcp::mcp_check_connectivity(&app, server))
+                })?)
+            }
+            "mcp:upload-dxt" => {
+                let bytes = arg::<Vec<u8>>(&args, 0)?;
+                let filename = arg::<String>(&args, 1)?;
+                to_value(commands::mcp::mcp_upload_dxt(bytes, filename)?)
+            }
+            "mcp:abort-tool" => {
+                let call_id = arg::<String>(&args, 0)?;
+                to_value(tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(commands::mcp::mcp_abort_tool(call_id))
+                })?)
+            }
+            "mcp:get-server-version" => {
+                let server = arg::<commands::mcp::McpServer>(&args, 0)?;
+                to_value(tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(commands::mcp::mcp_get_server_version(&app, server))
+                })?)
+            }
+            "mcp:get-server-logs" => {
+                let server = arg::<commands::mcp::McpServer>(&args, 0)?;
+                to_value(tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(commands::mcp::mcp_get_server_logs(server))
+                })?)
+            }
 
             // Misc stubs for optional integrations
             c if c.starts_with("mcp:") => Ok(Value::Null),
