@@ -231,6 +231,11 @@ const TabsContainer: React.FC<TabsContainerProps> = ({ children }) => {
   return (
     <Container>
       <TabsBar $isFullscreen={isFullscreen}>
+        <LeftButtonsContainer>
+          <SettingsButton onClick={handleSettingsClick} $active={activeTabId === 'settings'}>
+            <Settings size={16} />
+          </SettingsButton>
+        </LeftButtonsContainer>
         <HorizontalScrollContainer dependencies={[tabs]} gap="6px" className="tab-scroll-container">
           <Sortable
             items={visibleTabs}
@@ -290,9 +295,6 @@ const TabsContainer: React.FC<TabsContainerProps> = ({ children }) => {
               )}
             </ThemeButton>
           </Tooltip>
-          <SettingsButton onClick={handleSettingsClick} $active={activeTabId === 'settings'}>
-            <Settings size={16} />
-          </SettingsButton>
         </RightButtonsContainer>
         <WindowControls />
       </TabsBar>
@@ -415,6 +417,13 @@ const AddTabButton = styled.div`
   &:hover {
     background: var(--color-list-item);
   }
+`
+
+const LeftButtonsContainer = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 `
 
 const RightButtonsContainer = styled.div`
