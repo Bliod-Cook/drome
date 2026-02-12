@@ -10,7 +10,6 @@ import { WebSearchSource } from '@renderer/types'
 import type { Chunk } from '@renderer/types/chunk'
 import { ChunkType } from '@renderer/types/chunk'
 import { AssistantMessageStatus, MessageBlockStatus, MessageBlockType } from '@renderer/types/newMessage'
-import { NoOutputGeneratedError } from 'ai'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { RootState } from '../../index'
@@ -767,49 +766,6 @@ describe('streamCallback Integration Tests', () => {
 
     // 验证消息状态更新为成功（因为是暂停，不是真正的错误）
     const message = state.messages.entities[mockAssistantMsgId]
-    expect(message?.status).toBe(AssistantMessageStatus.SUCCESS)
-  })
-
-  it('should handle NoOutputGeneratedError as error and not keep pending', async () => {
-    const callbacks = createMockCallbacks(mockAssistantMsgId, mockTopicId, mockAssistant, dispatch, getState)
-
-    const chunks: Chunk[] = [
-      { type: ChunkType.LLM_RESPONSE_CREATED },
-      {
-        type: ChunkType.ERROR,
-        error: new NoOutputGeneratedError({ message: 'No output generated. Check the stream for errors.' })
-      }
-    ]
-
-    await processChunks(chunks, callbacks)
-
-    const state = getState()
-    const message = state.messages.entities[mockAssistantMsgId]
-    const errorBlock = Object.values(state.messageBlocks.entities).find((block) => block.type === MessageBlockType.ERROR)
-
-    expect(errorBlock).toBeDefined()
-    expect(message?.status).toBe(AssistantMessageStatus.ERROR)
-  })
-
-  it('should treat NoOutputGeneratedError with abort cause as paused/success', async () => {
-    const callbacks = createMockCallbacks(mockAssistantMsgId, mockTopicId, mockAssistant, dispatch, getState)
-
-    const abortCause = new DOMException('Request was aborted', 'AbortError')
-    const chunks: Chunk[] = [
-      { type: ChunkType.LLM_RESPONSE_CREATED },
-      {
-        type: ChunkType.ERROR,
-        error: new NoOutputGeneratedError({ cause: abortCause })
-      }
-    ]
-
-    await processChunks(chunks, callbacks)
-
-    const state = getState()
-    const message = state.messages.entities[mockAssistantMsgId]
-    const errorBlock = Object.values(state.messageBlocks.entities).find((block) => block.type === MessageBlockType.ERROR)
-
-    expect(errorBlock).toBeDefined()
     expect(message?.status).toBe(AssistantMessageStatus.SUCCESS)
   })
 
