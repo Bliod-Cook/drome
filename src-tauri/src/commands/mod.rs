@@ -1,5 +1,5 @@
-pub mod app;
 pub mod aes;
+pub mod app;
 pub mod backup;
 pub mod cherryai;
 pub mod config;
@@ -8,8 +8,8 @@ pub mod fs;
 pub mod http;
 pub mod ipc;
 pub mod mcp;
-pub mod mini_window;
 pub mod migration;
+pub mod mini_window;
 pub mod store_sync;
 pub mod system;
 pub mod trace;
