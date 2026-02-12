@@ -290,11 +290,13 @@ pub async fn ipc_invoke(
                 arg::<Vec<u8>>(&args, 0)?,
                 opt_arg::<String>(&args, 1)?,
             )?),
-            "file:download" => to_value(commands::file::file_download(
-                &state,
-                arg::<String>(&args, 0)?,
-                opt_arg::<bool>(&args, 1)?,
-            )?),
+            "file:download" => {
+                let url = arg::<String>(&args, 0)?;
+                let is_use_content_type = opt_arg::<bool>(&args, 1)?;
+                to_value(tokio::task::block_in_place(|| {
+                    commands::file::file_download(&state, url, is_use_content_type)
+                })?)
+            }
             "file:copy" => to_value(commands::file::file_copy(
                 &state,
                 arg::<String>(&args, 0)?,
@@ -606,9 +608,12 @@ pub async fn ipc_invoke(
             "file-service:retrieve" => Ok(Value::Null),
 
             // HTTP (native fetch proxy for Tauri to bypass CORS)
-            "http:fetch" => to_value(commands::http::http_fetch(arg::<
-                commands::http::HttpFetchRequest,
-            >(&args, 0)?)?),
+            "http:fetch" => {
+                let req = arg::<commands::http::HttpFetchRequest>(&args, 0)?;
+                to_value(tokio::task::block_in_place(|| {
+                    commands::http::http_fetch(req)
+                })?)
+            }
 
             // CherryAI
             "cherryai:get-signature" => {
