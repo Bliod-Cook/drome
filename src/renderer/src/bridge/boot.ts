@@ -133,4 +133,8 @@ async function init() {
   ;(window as any).__DROME_EMIT__ = emit
 }
 
-void init()
+try {
+  await init()
+} catch (error) {
+  console.error('[bridge/boot] Failed to initialize renderer bridge', error)
+}
