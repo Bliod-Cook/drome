@@ -325,6 +325,7 @@ const AddMcpServerModal: FC<AddMcpServerModalProps> = ({
       }}
       confirmLoading={loading}
       destroyOnHidden
+      forceRender
       centered
       transitionName="animation-move-down"
       width={600}>

@@ -1,1 +1,1 @@
-{}
+{"main":{"identifier":"main","description":"Main app capability (enables core event listen/unlisten for the renderer bridge).","remote":{"urls":["http://localhost:1420","http://localhost:1420/*","http://127.0.0.1:1420","http://127.0.0.1:1420/*"]},"local":true,"windows":["*"],"permissions":["core:default","core:event:default"]}}
