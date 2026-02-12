@@ -1,9 +1,11 @@
 pub mod app;
 pub mod aes;
 pub mod backup;
+pub mod cherryai;
 pub mod config;
 pub mod file;
 pub mod fs;
+pub mod http;
 pub mod ipc;
 pub mod mini_window;
 pub mod migration;

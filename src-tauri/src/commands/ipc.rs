@@ -449,6 +449,14 @@ pub async fn ipc_invoke(
       "file-service:delete" => Ok(Value::Null),
       "file-service:retrieve" => Ok(Value::Null),
 
+      // HTTP (native fetch proxy for Tauri to bypass CORS)
+      "http:fetch" => to_value(commands::http::http_fetch(arg::<commands::http::HttpFetchRequest>(&args, 0)?)?),
+
+      // CherryAI
+      "cherryai:get-signature" => to_value(commands::cherryai::cherryai_get_signature(
+        arg::<commands::cherryai::CherryAiSignatureParams>(&args, 0)?,
+      )?),
+
       // Misc stubs for optional integrations
       c if c.starts_with("mcp:") => Ok(Value::Null),
       c if c.starts_with("python:") => Ok(Value::Null),

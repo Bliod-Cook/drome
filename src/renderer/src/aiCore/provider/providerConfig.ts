@@ -36,12 +36,120 @@ import {
 } from '@renderer/utils/provider'
 import { defaultAppHeaders } from '@shared/utils'
 import { cloneDeep, isEmpty } from 'lodash'
+import { Base64 } from 'js-base64'
 
 import type { AiSdkConfig } from '../types'
 import { aihubmixProviderCreator, newApiResolverCreator, vertexAnthropicProviderCreator } from './config'
 import { azureAnthropicProviderCreator } from './config/azure-anthropic'
 import { COPILOT_DEFAULT_HEADERS } from './constants'
 import { getAiSdkProviderId } from './factory'
+
+type IpcHttpFetchRequest = {
+  url: string
+  method?: string
+  headers?: Record<string, string>
+  body?: string
+  bodyBase64?: string
+  timeoutMs?: number
+}
+
+type IpcHttpFetchResponse = {
+  ok: boolean
+  status: number
+  headers: Record<string, string>
+  bodyBase64: string
+}
+
+function headersToRecord(init?: HeadersInit): Record<string, string> {
+  if (!init) return {}
+
+  if (init instanceof Headers) {
+    const out: Record<string, string> = {}
+    init.forEach((value, key) => {
+      out[key] = value
+    })
+    return out
+  }
+
+  if (Array.isArray(init)) {
+    const out: Record<string, string> = {}
+    for (const [key, value] of init) {
+      out[String(key)] = String(value)
+    }
+    return out
+  }
+
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(init)) {
+    if (value == null) continue
+    out[key] = String(value)
+  }
+  return out
+}
+
+async function bodyToIpc(body: BodyInit | null | undefined): Promise<Pick<IpcHttpFetchRequest, 'body' | 'bodyBase64'>> {
+  if (body == null) return {}
+  if (typeof body === 'string') return { body }
+  if (body instanceof URLSearchParams) return { body: body.toString() }
+  if (body instanceof Blob) {
+    const buf = await body.arrayBuffer()
+    return { bodyBase64: Base64.fromUint8Array(new Uint8Array(buf)) }
+  }
+  if (body instanceof ArrayBuffer) return { bodyBase64: Base64.fromUint8Array(new Uint8Array(body)) }
+  if (ArrayBuffer.isView(body)) {
+    return {
+      bodyBase64: Base64.fromUint8Array(new Uint8Array(body.buffer, body.byteOffset, body.byteLength))
+    }
+  }
+  if (body instanceof Uint8Array) return { bodyBase64: Base64.fromUint8Array(body) }
+  return { body: String(body) }
+}
+
+// Tauri's WebView enforces CORS; proxy network requests through Rust to match Electron's `webSecurity: false` behavior.
+async function nativeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  if (typeof window === 'undefined' || (window as any).__TAURI_INTERNALS__ == null) {
+    return fetch(input, init)
+  }
+
+  const ipc = (window as any)?.electron?.ipcRenderer
+  const invokeChannel: (channel: string, payload: any) => Promise<any> = ipc?.invoke
+    ? (channel, payload) => ipc.invoke(channel, payload)
+    : async (channel, payload) => {
+        const { invoke } = await import('@tauri-apps/api/core')
+        return invoke('ipc_invoke', { channel, args: [payload] })
+      }
+
+  let url: string
+  if (typeof input === 'string') url = input
+  else if (input instanceof URL) url = input.toString()
+  else if (input instanceof Request) url = input.url
+  else url = String(input)
+
+  const method = init?.method ?? (input instanceof Request ? input.method : undefined) ?? 'GET'
+  const headers = headersToRecord(init?.headers ?? (input instanceof Request ? input.headers : undefined))
+  const { body, bodyBase64 } = await bodyToIpc(init?.body)
+
+  const req: IpcHttpFetchRequest = {
+    url,
+    method,
+    headers,
+    body,
+    bodyBase64
+  }
+
+  let result: IpcHttpFetchResponse
+  try {
+    result = (await invokeChannel('http:fetch', req)) as IpcHttpFetchResponse
+  } catch (err) {
+    const message = typeof err === 'string' ? err : (err as any)?.message ?? 'Failed to fetch'
+    throw new TypeError(message)
+  }
+
+  const bytes = typeof result?.bodyBase64 === 'string' ? Base64.toUint8Array(result.bodyBase64) : new Uint8Array()
+  const status = typeof result?.status === 'number' ? result.status : 200
+  const responseHeaders = typeof result?.headers === 'object' && result.headers ? result.headers : {}
+  return new Response(bytes, { status, headers: responseHeaders })
+}
 
 /**
  * 处理特殊provider的转换逻辑
@@ -189,6 +297,7 @@ type ExtraOptions = BedrockExtraOptions | AzureOpenAIExtraOptions | VertexExtraO
  */
 export function providerToAiSdkConfig(actualProvider: Provider, model: Model): AiSdkConfig {
   const aiSdkProviderId = getAiSdkProviderId(actualProvider)
+  const runtimeFetch: typeof fetch = nativeFetch
 
   // 构建基础配置
   const { baseURL, endpoint } = routeToEndpoint(actualProvider.apiHost)
@@ -212,6 +321,7 @@ export function providerToAiSdkConfig(actualProvider: Provider, model: Model): A
         ...storedHeaders,
         ...actualProvider.extra_headers
       },
+      fetch: runtimeFetch,
       name: actualProvider.id,
       includeUsage
     })
@@ -228,6 +338,7 @@ export function providerToAiSdkConfig(actualProvider: Provider, model: Model): A
       providerId: 'ollama',
       options: {
         ...baseConfig,
+        fetch: runtimeFetch,
         headers: {
           ...actualProvider.extra_headers,
           Authorization: !isEmpty(baseConfig.apiKey) ? `Bearer ${baseConfig.apiKey}` : undefined
@@ -267,14 +378,14 @@ export function providerToAiSdkConfig(actualProvider: Provider, model: Model): A
     }
   }
 
-  let _fetch: typeof fetch | undefined
+  let _fetch: typeof fetch = runtimeFetch
 
   // Apply developer-to-system role conversion for providers that don't support developer role
   // bug: https://github.com/vercel/ai/issues/10982
   // fixPR: https://github.com/vercel/ai/pull/11127
   // TODO: but the PR don't backport to v5, the code will be removed when upgrading to v6
   if (!isSupportDeveloperRoleProvider(actualProvider) || !isOpenAIReasoningModel(model)) {
-    _fetch = createDeveloperToSystemFetch(fetch)
+    _fetch = createDeveloperToSystemFetch(runtimeFetch)
   }
 
   const baseExtraOptions = {
@@ -472,6 +583,7 @@ export async function prepareSpecialProviderConfig(
       break
     }
     case 'cherryai': {
+      const baseFetch = config.options.fetch ?? nativeFetch
       config.options.fetch = async (url, options) => {
         // 在这里对最终参数进行签名
         const signature = await window.api.cherryai.generateSignature({
@@ -480,7 +592,7 @@ export async function prepareSpecialProviderConfig(
           query: '',
           body: JSON.parse(options.body)
         })
-        return fetch(url, {
+        return baseFetch(url, {
           ...options,
           headers: {
             ...options.headers,

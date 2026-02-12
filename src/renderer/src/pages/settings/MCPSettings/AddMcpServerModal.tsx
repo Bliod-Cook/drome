@@ -75,6 +75,7 @@ const AddMcpServerModal: FC<AddMcpServerModalProps> = ({
   const [form] = Form.useForm()
   const [loading, setLoading] = useState(false)
   const [importMethod, setImportMethod] = useState<'json' | 'dxt'>(initialImportMethod)
+  const [serverConfigValue, setServerConfigValue] = useState<string>('')
   const [dxtFile, setDxtFile] = useState<File | null>(null)
   const dispatch = useAppDispatch()
   const { setTimeoutTimer } = useTimer()
@@ -275,6 +276,7 @@ const AddMcpServerModal: FC<AddMcpServerModalProps> = ({
 
         onSuccess(newServer)
         form.resetFields()
+        setServerConfigValue('')
         onClose()
 
         // 在背景非同步檢查伺服器可用性並更新狀態
@@ -297,14 +299,13 @@ const AddMcpServerModal: FC<AddMcpServerModalProps> = ({
   // CodeEditor 內容變更時的回呼函式
   const handleEditorChange = useCallback(
     (newContent: string) => {
+      setServerConfigValue(newContent)
       form.setFieldsValue({ serverConfig: newContent })
       // 可選：如果希望即時驗證，可以取消註解下一行
       // form.validateFields(['serverConfig']);
     },
     [form]
   )
-
-  const serverConfigValue = form.getFieldValue('serverConfig')
 
   return (
     <Modal
@@ -317,6 +318,7 @@ const AddMcpServerModal: FC<AddMcpServerModalProps> = ({
       onOk={handleOk}
       onCancel={() => {
         form.resetFields()
+        setServerConfigValue('')
         setDxtFile(null)
         setImportMethod(initialImportMethod)
         onClose()

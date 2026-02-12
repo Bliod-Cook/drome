@@ -305,8 +305,8 @@ export function createWindowApi(ipcRenderer: { invoke: IpcInvoke }): WindowApi {
       getPrompt: (args: any) => safeInvoke(IpcChannel.Mcp_GetPrompt, null as any, args),
       listResources: (server: any) => safeInvoke(IpcChannel.Mcp_ListResources, [] as any, server),
       getResource: (args: any) => safeInvoke(IpcChannel.Mcp_GetResource, null as any, args),
-      getInstallInfo: () => safeInvoke(IpcChannel.Mcp_GetInstallInfo, null as any),
-      checkMcpConnectivity: (server: any) => safeInvoke(IpcChannel.Mcp_CheckConnectivity, { ok: false } as any, server),
+      getInstallInfo: () => safeInvoke(IpcChannel.Mcp_GetInstallInfo, { uvPath: null, bunPath: null, dir: null } as any),
+      checkMcpConnectivity: (server: any) => safeInvoke(IpcChannel.Mcp_CheckConnectivity, false as any, server),
       uploadDxt: async (file: File) => {
         const buffer = await file.arrayBuffer()
         return safeInvoke(IpcChannel.Mcp_UploadDxt, { success: false } as any, Array.from(new Uint8Array(buffer)), file.name)
@@ -327,13 +327,14 @@ export function createWindowApi(ipcRenderer: { invoke: IpcInvoke }): WindowApi {
       openExternal: (url: string, _options?: any) => invoke(IpcChannel.Open_Website, url),
     },
     copilot: {
-      getAuthMessage: (headers?: Record<string, string>) => safeInvoke(IpcChannel.Copilot_GetAuthMessage, null as any, headers),
+      getAuthMessage: (headers?: Record<string, string>) =>
+        safeInvoke(IpcChannel.Copilot_GetAuthMessage, { device_code: '', user_code: '', verification_uri: '' } as any, headers),
       getCopilotToken: (device_code: string, headers?: Record<string, string>) =>
-        safeInvoke(IpcChannel.Copilot_GetCopilotToken, null as any, device_code, headers),
+        safeInvoke(IpcChannel.Copilot_GetCopilotToken, { access_token: '' } as any, device_code, headers),
       saveCopilotToken: (access_token: string) => safeInvoke(IpcChannel.Copilot_SaveCopilotToken, null as any, access_token),
-      getToken: (headers?: Record<string, string>) => safeInvoke(IpcChannel.Copilot_GetToken, null as any, headers),
+      getToken: (headers?: Record<string, string>) => safeInvoke(IpcChannel.Copilot_GetToken, { token: '' } as any, headers),
       logout: () => safeInvoke(IpcChannel.Copilot_Logout, null as any),
-      getUser: (token: string) => safeInvoke(IpcChannel.Copilot_GetUser, null as any, token),
+      getUser: (token: string) => safeInvoke(IpcChannel.Copilot_GetUser, { login: '', avatar: '' } as any, token),
     },
     cherryin: {
       saveToken: (accessToken: string, refreshToken?: string) =>
@@ -455,7 +456,7 @@ export function createWindowApi(ipcRenderer: { invoke: IpcInvoke }): WindowApi {
       listProviders: () => safeInvoke(IpcChannel.OCR_ListProviders, [] as any),
     },
     cherryai: {
-      generateSignature: (params: any) => safeInvoke(IpcChannel.Cherryai_GetSignature, null as any, params),
+      generateSignature: (params: any) => safeInvoke(IpcChannel.Cherryai_GetSignature, {} as any, params),
     },
     windowControls: {
       minimize: () => invoke(IpcChannel.Windows_Minimize),
