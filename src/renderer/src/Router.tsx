@@ -60,6 +60,7 @@ const Router: FC = () => {
 
   return (
     <HashRouter>
+      <Sidebar />
       <NavigationHandler />
       <TabsContainer>{routes}</TabsContainer>
     </HashRouter>
