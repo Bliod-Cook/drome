@@ -93,7 +93,25 @@ pub async fn ipc_invoke(
       "app:mac-request-process-trust" => to_value(false),
       "app:quote-to-main" => Ok(Value::Null),
       "app:set-disable-hardware-acceleration" => Ok(Value::Null),
-      "app:set-use-system-title-bar" => Ok(Value::Null),
+      "app:set-use-system-title-bar" => {
+        let is_active = arg::<bool>(&args, 0)?;
+        commands::config::config_set(
+          &state,
+          &app,
+          "useSystemTitleBar".to_string(),
+          Value::Bool(is_active),
+          true,
+        )?;
+
+        #[cfg(target_os = "linux")]
+        {
+          window
+            .set_decorations(is_active)
+            .map_err(|e| DromeError::Message(e.to_string()))?;
+        }
+
+        Ok(Value::Null)
+      }
       "app:get-system-fonts" => to_value(Vec::<String>::new()),
       "app:crash-render-process" => Ok(Value::Null),
       "redux-store-ready" => Ok(Value::Null),

@@ -1,3 +1,5 @@
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod commands;
 mod error;
 mod state;
@@ -61,6 +63,23 @@ fn read_allowed_dirs(config_dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     .collect()
 }
 
+#[cfg(target_os = "linux")]
+fn read_use_system_title_bar(config_dir: &std::path::Path) -> bool {
+  let store_path = config_dir.join("store.json");
+  let content = match std::fs::read_to_string(store_path) {
+    Ok(c) => c,
+    Err(_) => return false,
+  };
+  let value: serde_json::Value = match serde_json::from_str(&content) {
+    Ok(v) => v,
+    Err(_) => return false,
+  };
+  value
+    .get("useSystemTitleBar")
+    .and_then(|v| v.as_bool())
+    .unwrap_or(false)
+}
+
 fn main() {
   tauri::Builder::default()
     .plugin(tauri_plugin_shell::init())
@@ -89,6 +108,9 @@ fn main() {
 
       let allowed_dirs = read_allowed_dirs(&app_config_dir);
 
+      #[cfg(target_os = "linux")]
+      let use_system_title_bar = read_use_system_title_bar(&app_config_dir);
+
       app.manage(AppState {
         app_data_dir,
         app_config_dir,
@@ -98,6 +120,17 @@ fn main() {
       });
 
       let main = app.get_webview_window("main").expect("missing main window");
+
+      #[cfg(target_os = "windows")]
+      {
+        let _ = main.set_decorations(false);
+      }
+
+      #[cfg(target_os = "linux")]
+      {
+        let _ = main.set_decorations(use_system_title_bar);
+      }
+
       let main_for_events = main.clone();
       let app_handle = app.handle().clone();
 
