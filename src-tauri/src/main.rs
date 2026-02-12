@@ -155,7 +155,6 @@ fn main() {
             // Also forward resize events for the existing renderer hooks.
             main.on_window_event(move |event| match event {
                 WindowEvent::CloseRequested { api, .. } => {
-                    api.prevent_close();
                     let stop_quit = app_handle
                         .state::<AppState>()
                         .stop_quit
@@ -164,13 +163,15 @@ fn main() {
                         .unwrap_or(false);
                     if stop_quit {
                         // Renderer intentionally blocks quitting during critical operations (migration/copy).
+                        api.prevent_close();
                         return;
                     }
+                    api.prevent_close();
                     let _ = main_for_events.emit("app:save-data", serde_json::json!({}));
-                    let win = main_for_events.clone();
+                    let app_for_exit = app_handle.clone();
                     tauri::async_runtime::spawn(async move {
                         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                        let _ = win.close();
+                        app_for_exit.exit(0);
                     });
                 }
                 WindowEvent::Resized(size) => {
