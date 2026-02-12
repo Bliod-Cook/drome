@@ -306,8 +306,8 @@ const DisplaySettings: FC = () => {
             shape="round"
             onChange={setNavbarPosition}
             options={[
-              { label: t('settings.display.navbar.position.left'), value: 'left' },
-              { label: t('settings.display.navbar.position.top'), value: 'top' }
+              { label: t('settings.display.navbar.position.top'), value: 'top' },
+              { label: t('settings.display.navbar.position.left'), value: 'left' }
             ]}
           />
         </SettingRow>
