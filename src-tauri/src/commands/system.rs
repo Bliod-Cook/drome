@@ -235,12 +235,20 @@ pub fn system_set_git_bash_path(state: &State<'_, AppState>, new_path: Option<St
 }
 
 pub fn system_toggle_devtools(window: &WebviewWindow) -> Result<()> {
-  // Best-effort toggle (API differs across platforms/tauri versions).
-  let is_open = window.is_devtools_open();
-  if is_open {
-    window.close_devtools();
-  } else {
-    window.open_devtools();
+  // Devtools APIs are only available on debug builds in Tauri by default.
+  #[cfg(debug_assertions)]
+  {
+    let is_open = window.is_devtools_open();
+    if is_open {
+      window.close_devtools();
+    } else {
+      window.open_devtools();
+    }
+  }
+
+  #[cfg(not(debug_assertions))]
+  {
+    let _ = window;
   }
   Ok(())
 }
