@@ -38,3 +38,8 @@ reqwest = { version = "0.12.12", default-features = false, features = ["blocking
 sha2 = "0.10.9"
 sysinfo = "0.38.1"
 uuid = { version = "1.18.1", features = ["v4"] }
+
+[features]
+# Builds the desktop app with WebView DevTools enabled in release mode.
+# NOTE: Don't ship this in production unless you understand the security implications.
+devtools = ["tauri/devtools"]

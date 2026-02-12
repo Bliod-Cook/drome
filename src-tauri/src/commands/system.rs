@@ -235,8 +235,9 @@ pub fn system_set_git_bash_path(state: &State<'_, AppState>, new_path: Option<St
 }
 
 pub fn system_toggle_devtools(window: &WebviewWindow) -> Result<()> {
-  // Devtools APIs are only available on debug builds in Tauri by default.
-  #[cfg(debug_assertions)]
+  // Devtools APIs are only available on debug builds in Tauri by default,
+  // unless the `devtools` Cargo feature is enabled.
+  #[cfg(any(debug_assertions, feature = "devtools"))]
   {
     let is_open = window.is_devtools_open();
     if is_open {
@@ -246,7 +247,7 @@ pub fn system_toggle_devtools(window: &WebviewWindow) -> Result<()> {
     }
   }
 
-  #[cfg(not(debug_assertions))]
+  #[cfg(not(any(debug_assertions, feature = "devtools")))]
   {
     let _ = window;
   }
