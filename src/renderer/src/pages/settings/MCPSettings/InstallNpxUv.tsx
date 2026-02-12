@@ -39,7 +39,9 @@ const InstallNpxUv: FC<Props> = ({ mini = false }) => {
   const checkBinaries = useCallback(async () => {
     const uvExists = await window.api.isBinaryExist('uv')
     const bunExists = await window.api.isBinaryExist('bun')
-    const { uvPath, bunPath, dir } = await window.api.mcp.getInstallInfo()
+    const installInfo = await window.api.mcp.getInstallInfo()
+    const { uvPath, bunPath, dir } =
+      installInfo && typeof installInfo === 'object' ? (installInfo as any) : { uvPath: null, bunPath: null, dir: null }
 
     dispatch(setIsUvInstalled(uvExists))
     dispatch(setIsBunInstalled(bunExists))

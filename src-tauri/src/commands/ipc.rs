@@ -457,6 +457,9 @@ pub async fn ipc_invoke(
         arg::<commands::cherryai::CherryAiSignatureParams>(&args, 0)?,
       )?),
 
+      // MCP
+      "mcp:get-install-info" => to_value(commands::mcp::mcp_get_install_info()?),
+
       // Misc stubs for optional integrations
       c if c.starts_with("mcp:") => Ok(Value::Null),
       c if c.starts_with("python:") => Ok(Value::Null),

@@ -7,6 +7,7 @@ pub mod file;
 pub mod fs;
 pub mod http;
 pub mod ipc;
+pub mod mcp;
 pub mod mini_window;
 pub mod migration;
 pub mod store_sync;
