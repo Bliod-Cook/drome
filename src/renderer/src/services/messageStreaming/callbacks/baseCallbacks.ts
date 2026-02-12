@@ -79,11 +79,15 @@ export const createBaseCallbacks = (deps: BaseCallbacksDependencies) => {
 
     onError: async (error: AISDKError) => {
       logger.debug('onError', error)
-      if (NoOutputGeneratedError.isInstance(error)) {
-        return
-      }
-      const isErrorTypeAbort = isAbortError(error)
-      const serializableError = serializeError(error)
+      // AI SDK may wrap abort/network failures in NoOutputGeneratedError.
+      // Do not early-return here, otherwise the assistant message stays pending forever.
+      const normalizedError =
+        NoOutputGeneratedError.isInstance(error) && error.cause instanceof Error
+          ? (error.cause as AISDKError)
+          : error
+
+      const isErrorTypeAbort = isAbortError(normalizedError)
+      const serializableError = serializeError(normalizedError)
       if (isErrorTypeAbort) {
         serializableError.message = 'pause_placeholder'
       }
