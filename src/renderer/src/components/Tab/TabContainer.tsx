@@ -4,18 +4,21 @@ import { Sortable, useDndReorder } from '@renderer/components/dnd'
 import HorizontalScrollContainer from '@renderer/components/HorizontalScrollContainer'
 import { isLinux, isMac } from '@renderer/config/constant'
 import { allMinApps } from '@renderer/config/minapps'
+import { useTheme } from '@renderer/context/ThemeProvider'
 import { useFullscreen } from '@renderer/hooks/useFullscreen'
 import { useMinappPopup } from '@renderer/hooks/useMinappPopup'
 import { useMinapps } from '@renderer/hooks/useMinapps'
 import { useSettings } from '@renderer/hooks/useSettings'
-import { getTitleLabel } from '@renderer/i18n/label'
+import { getThemeModeLabel, getTitleLabel } from '@renderer/i18n/label'
 import UpdateAppButton from '@renderer/pages/home/components/UpdateAppButton'
 import tabsService from '@renderer/services/TabsService'
 import { useAppDispatch, useAppSelector } from '@renderer/store'
 import type { Tab } from '@renderer/store/tabs'
 import { addTab, removeTab, setActiveTab, setTabs } from '@renderer/store/tabs'
 import type { MinAppType } from '@renderer/types'
+import { ThemeMode } from '@renderer/types'
 import { classNames } from '@renderer/utils'
+import { Tooltip } from 'antd'
 import type { LRUCache } from 'lru-cache'
 import {
   FileSearch,
@@ -23,14 +26,18 @@ import {
   Home,
   Languages,
   LayoutGrid,
+  Monitor,
+  Moon,
   NotepadText,
   Palette,
   Settings,
   Sparkle,
+  Sun,
   Terminal,
   X
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router-dom'
 import styled from 'styled-components'
 
@@ -107,6 +114,7 @@ const getTabIcon = (
   }
 }
 
+let lastSettingsPath = '/settings/provider'
 const specialTabs = ['launchpad', 'settings']
 
 const TabsContainer: React.FC<TabsContainerProps> = ({ children }) => {
@@ -116,9 +124,11 @@ const TabsContainer: React.FC<TabsContainerProps> = ({ children }) => {
   const tabs = useAppSelector((state) => state.tabs.tabs)
   const activeTabId = useAppSelector((state) => state.tabs.activeTabId)
   const isFullscreen = useFullscreen()
+  const { settedTheme, toggleTheme } = useTheme()
   const { hideMinappPopup, minAppsCache } = useMinappPopup()
   const { minapps } = useMinapps()
   const { useSystemTitleBar } = useSettings()
+  const { t } = useTranslation()
 
   const getTabId = (path: string): string => {
     if (path === '/') return 'home'
@@ -179,6 +189,10 @@ const TabsContainer: React.FC<TabsContainerProps> = ({ children }) => {
       dispatch(setActiveTab(currentTab.id))
     }
 
+    // 当访问设置页面时，记录路径
+    if (location.pathname.startsWith('/settings/')) {
+      lastSettingsPath = location.pathname
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch, location.pathname])
 
@@ -193,6 +207,11 @@ const TabsContainer: React.FC<TabsContainerProps> = ({ children }) => {
   const handleAddTab = () => {
     hideMinappPopup()
     navigate('/launchpad')
+  }
+
+  const handleSettingsClick = () => {
+    hideMinappPopup()
+    navigate(lastSettingsPath)
   }
 
   const handleTabClick = (tab: Tab) => {
@@ -212,6 +231,11 @@ const TabsContainer: React.FC<TabsContainerProps> = ({ children }) => {
   return (
     <Container>
       <TabsBar $isFullscreen={isFullscreen}>
+        <LeftButtonsContainer>
+          <SettingsButton onClick={handleSettingsClick} $active={activeTabId === 'settings'}>
+            <Settings size={16} />
+          </SettingsButton>
+        </LeftButtonsContainer>
         <HorizontalScrollContainer dependencies={[tabs]} gap="6px" className="tab-scroll-container">
           <Sortable
             items={visibleTabs}
@@ -257,6 +281,20 @@ const TabsContainer: React.FC<TabsContainerProps> = ({ children }) => {
         </HorizontalScrollContainer>
         <RightButtonsContainer style={{ paddingRight: isLinux && useSystemTitleBar ? '12px' : undefined }}>
           <UpdateAppButton />
+          <Tooltip
+            title={t('settings.theme.title') + ': ' + getThemeModeLabel(settedTheme)}
+            mouseEnterDelay={0.8}
+            placement="bottom">
+            <ThemeButton onClick={toggleTheme}>
+              {settedTheme === ThemeMode.dark ? (
+                <Moon size={16} />
+              ) : settedTheme === ThemeMode.light ? (
+                <Sun size={16} />
+              ) : (
+                <Monitor size={16} />
+              )}
+            </ThemeButton>
+          </Tooltip>
         </RightButtonsContainer>
         <WindowControls />
       </TabsBar>
@@ -272,9 +310,8 @@ const TabsContainer: React.FC<TabsContainerProps> = ({ children }) => {
 const Container = styled.div`
   display: flex;
   flex-direction: column;
-  flex: 1;
   height: 100%;
-  min-width: 0;
+  width: 100%;
 `
 
 const TabsBar = styled.div<{ $isFullscreen: boolean }>`
@@ -398,11 +435,41 @@ const RightButtonsContainer = styled.div`
   flex-shrink: 0;
 `
 
+const ThemeButton = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  cursor: pointer;
+  color: var(--color-text);
+
+  &:hover {
+    background: var(--color-list-item);
+    border-radius: 8px;
+  }
+`
+
+const SettingsButton = styled.div<{ $active: boolean }>`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  cursor: pointer;
+  color: var(--color-text);
+  border-radius: 8px;
+  background: ${(props) => (props.$active ? 'var(--color-list-item)' : 'transparent')};
+  &:hover {
+    background: var(--color-list-item);
+  }
+`
+
 const TabContent = styled.div`
   display: flex;
   flex: 1;
   overflow: hidden;
-  min-width: 0;
+  width: calc(100vw - 12px);
   margin: 6px;
   margin-top: 0;
   border-radius: 8px;
