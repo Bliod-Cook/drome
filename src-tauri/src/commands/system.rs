@@ -84,19 +84,22 @@ fn common_git_bash_candidates() -> Vec<PathBuf> {
 
   // Program Files
   if let Ok(pf) = std::env::var("ProgramFiles") {
-    out.push(PathBuf::from(pf).join("Git").join("bin").join("bash.exe"));
-    out.push(PathBuf::from(pf).join("Git").join("usr").join("bin").join("bash.exe"));
+    let pf = PathBuf::from(pf);
+    out.push(pf.join("Git").join("bin").join("bash.exe"));
+    out.push(pf.join("Git").join("usr").join("bin").join("bash.exe"));
   }
   if let Ok(pf86) = std::env::var("ProgramFiles(x86)") {
-    out.push(PathBuf::from(pf86).join("Git").join("bin").join("bash.exe"));
-    out.push(PathBuf::from(pf86).join("Git").join("usr").join("bin").join("bash.exe"));
+    let pf86 = PathBuf::from(pf86);
+    out.push(pf86.join("Git").join("bin").join("bash.exe"));
+    out.push(pf86.join("Git").join("usr").join("bin").join("bash.exe"));
   }
 
   // LocalAppData
   if let Ok(local) = std::env::var("LocalAppData") {
-    out.push(PathBuf::from(local).join("Programs").join("Git").join("bin").join("bash.exe"));
+    let local = PathBuf::from(local);
+    out.push(local.join("Programs").join("Git").join("bin").join("bash.exe"));
     out.push(
-      PathBuf::from(local)
+      local
         .join("Programs")
         .join("Git")
         .join("usr")
