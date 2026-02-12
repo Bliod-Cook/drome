@@ -4,7 +4,10 @@ export type IpcRendererListener = (event: any, payload: any) => void
 
 type ListenerRecord = {
   channel: string
-  unlisten: UnlistenFn
+  listener: IpcRendererListener
+  unlistenPromise: Promise<UnlistenFn>
+  unlisten?: UnlistenFn
+  removed: boolean
 }
 
 export class IpcRendererShim {
@@ -19,35 +22,89 @@ export class IpcRendererShim {
   ) {}
 
   on(channel: string, listener: IpcRendererListener): () => void {
-    let removed = false
-    const p = this.impl.listen(channel, (e) => {
+    const unlistenPromise = this.impl.listen(channel, (e) => {
       listener(null, e.payload)
     })
-    const remover = () => {
-      if (removed) return
-      removed = true
-      p.then((unlisten) => unlisten()).catch(() => {})
-    }
-    p.then((unlisten) => this.listeners.push({ channel, unlisten })).catch(() => {})
-    return remover
+
+    const rec: ListenerRecord = { channel, listener, unlistenPromise, removed: false }
+    this.listeners.push(rec)
+
+    unlistenPromise
+      .then((unlisten) => {
+        rec.unlisten = unlisten
+        if (rec.removed) {
+          try {
+            unlisten()
+          } catch {
+            // ignore
+          }
+        }
+      })
+      .catch(() => {
+        rec.removed = true
+      })
+
+    return () => this.off(channel, listener)
   }
 
   once(channel: string, listener: IpcRendererListener): () => void {
-    let removed = false
-    const p = this.impl.once(channel, (e) => {
+    const unlistenPromise = this.impl.once(channel, (e) => {
       listener(null, e.payload)
     })
-    const remover = () => {
-      if (removed) return
-      removed = true
-      p.then((unlisten) => unlisten()).catch(() => {})
-    }
-    p.then((unlisten) => this.listeners.push({ channel, unlisten })).catch(() => {})
-    return remover
+
+    const rec: ListenerRecord = { channel, listener, unlistenPromise, removed: false }
+    this.listeners.push(rec)
+
+    unlistenPromise
+      .then((unlisten) => {
+        rec.unlisten = unlisten
+        if (rec.removed) {
+          try {
+            unlisten()
+          } catch {
+            // ignore
+          }
+        }
+      })
+      .catch(() => {
+        rec.removed = true
+      })
+
+    return () => this.off(channel, listener)
   }
 
   async invoke(channel: string, ...args: any[]): Promise<any> {
     return this.impl.invoke(channel, args)
+  }
+
+  addListener(channel: string, listener: IpcRendererListener): () => void {
+    return this.on(channel, listener)
+  }
+
+  off(channel: string, listener: IpcRendererListener): void {
+    this.removeListener(channel, listener)
+  }
+
+  removeListener(channel: string, listener: IpcRendererListener): void {
+    const remaining: ListenerRecord[] = []
+    for (const rec of this.listeners) {
+      if (rec.channel === channel && rec.listener === listener) {
+        rec.removed = true
+        const unlisten = rec.unlisten
+        if (unlisten) {
+          try {
+            unlisten()
+          } catch {
+            // ignore
+          }
+        } else {
+          rec.unlistenPromise.then((u) => u()).catch(() => {})
+        }
+      } else {
+        remaining.push(rec)
+      }
+    }
+    this.listeners = remaining
   }
 
   removeAllListeners(channel: string): void {
@@ -55,7 +112,12 @@ export class IpcRendererShim {
     for (const rec of this.listeners) {
       if (rec.channel === channel) {
         try {
-          rec.unlisten()
+          rec.removed = true
+          if (rec.unlisten) {
+            rec.unlisten()
+          } else {
+            rec.unlistenPromise.then((u) => u()).catch(() => {})
+          }
         } catch {
           // ignore
         }
@@ -66,4 +128,3 @@ export class IpcRendererShim {
     this.listeners = remaining
   }
 }
-

@@ -1,10 +1,14 @@
 pub mod app;
+pub mod aes;
 pub mod backup;
 pub mod config;
 pub mod file;
 pub mod fs;
 pub mod ipc;
+pub mod mini_window;
 pub mod migration;
 pub mod store_sync;
+pub mod system;
+pub mod trace;
 pub mod window;
 pub mod zip;

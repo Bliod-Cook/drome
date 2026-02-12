@@ -41,6 +41,26 @@ fn read_app_data_override(config_dir: &std::path::Path) -> Option<std::path::Pat
   Some(normalize_path(s))
 }
 
+fn read_allowed_dirs(config_dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+  let store_path = config_dir.join("store.json");
+  let content = match std::fs::read_to_string(store_path) {
+    Ok(c) => c,
+    Err(_) => return Vec::new(),
+  };
+  let value: serde_json::Value = match serde_json::from_str(&content) {
+    Ok(v) => v,
+    Err(_) => return Vec::new(),
+  };
+  let Some(arr) = value.get("allowedDirs").and_then(|v| v.as_array()) else {
+    return Vec::new();
+  };
+  arr
+    .iter()
+    .filter_map(|v| v.as_str())
+    .map(|s| normalize_path(s))
+    .collect()
+}
+
 fn main() {
   tauri::Builder::default()
     .plugin(tauri_plugin_shell::init())
@@ -67,11 +87,14 @@ fn main() {
         default_app_data_dir
       };
 
+      let allowed_dirs = read_allowed_dirs(&app_config_dir);
+
       app.manage(AppState {
         app_data_dir,
         app_config_dir,
-        allowed_dirs: std::sync::Mutex::new(Vec::new()),
+        allowed_dirs: std::sync::Mutex::new(allowed_dirs),
         stop_quit: std::sync::Mutex::new(Default::default()),
+        zoom_factor: std::sync::Mutex::new(1.0),
       });
 
       let main = app.get_webview_window("main").expect("missing main window");

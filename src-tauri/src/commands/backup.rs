@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -8,6 +9,7 @@ use zip::write::SimpleFileOptions;
 use zip::ZipArchive;
 use zip::ZipWriter;
 
+use crate::commands::system;
 use crate::error::{DromeError, Result};
 use crate::state::AppState;
 
@@ -26,6 +28,15 @@ fn tmp_dir(state: &State<'_, AppState>) -> PathBuf {
 fn ensure_dir(path: &Path) -> Result<()> {
   std::fs::create_dir_all(path)?;
   Ok(())
+}
+
+fn allow_dir(state: &State<'_, AppState>, dir: &Path) {
+  if let Ok(mut dirs) = state.allowed_dirs.lock() {
+    if !dirs.iter().any(|d| d == dir) {
+      dirs.push(dir.to_path_buf());
+    }
+  }
+  let _ = system::add_allowed_dir_to_store(state, dir);
 }
 
 pub fn backup_backup(_app: &AppHandle, window: &WebviewWindow, state: &State<'_, AppState>, args: Vec<Value>) -> Result<String> {
@@ -139,4 +150,152 @@ pub fn backup_restore(_app: &AppHandle, window: &WebviewWindow, state: &State<'_
 
   emit_progress(window, "restore-progress", "completed", 100);
   Ok(data_json)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalBackupConfig {
+  local_backup_dir: Option<String>,
+  skip_backup_file: Option<bool>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupFileEntry {
+  pub file_name: String,
+  pub modified_time: String,
+  pub size: u64,
+}
+
+pub fn backup_to_local_dir(
+  app: &AppHandle,
+  window: &WebviewWindow,
+  state: &State<'_, AppState>,
+  data: String,
+  file_name: String,
+  local_config: Value,
+) -> Result<String> {
+  let config: LocalBackupConfig = serde_json::from_value(local_config)
+    .map_err(|e| DromeError::Message(format!("Invalid local backup config: {e}")))?;
+  let dir = config
+    .local_backup_dir
+    .clone()
+    .filter(|s| !s.trim().is_empty())
+    .ok_or_else(|| DromeError::Message("localBackupDir is required".into()))?;
+
+  let dest_dir = PathBuf::from(dir);
+  ensure_dir(&dest_dir)?;
+  allow_dir(state, &dest_dir);
+
+  let args = vec![
+    Value::String(file_name),
+    Value::String(data),
+    Value::String(dest_dir.to_string_lossy().to_string()),
+    Value::Bool(config.skip_backup_file.unwrap_or(false)),
+  ];
+  backup_backup(app, window, state, args)
+}
+
+pub fn restore_from_local_backup(
+  app: &AppHandle,
+  window: &WebviewWindow,
+  state: &State<'_, AppState>,
+  file_name: String,
+  local_backup_dir: Option<String>,
+) -> Result<String> {
+  let dir = local_backup_dir
+    .filter(|s| !s.trim().is_empty())
+    .ok_or_else(|| DromeError::Message("localBackupDir is required".into()))?;
+  let path = PathBuf::from(dir).join(file_name);
+  backup_restore(app, window, state, path.to_string_lossy().to_string())
+}
+
+pub fn list_local_backup_files(local_backup_dir: Option<String>) -> Result<Vec<BackupFileEntry>> {
+  let Some(dir) = local_backup_dir.filter(|s| !s.trim().is_empty()) else {
+    return Ok(Vec::new());
+  };
+  let dir = PathBuf::from(dir);
+  if !dir.exists() || !dir.is_dir() {
+    return Ok(Vec::new());
+  }
+
+  let mut out: Vec<BackupFileEntry> = Vec::new();
+  for entry in std::fs::read_dir(&dir)? {
+    let Ok(entry) = entry else { continue };
+    let path = entry.path();
+    if !path.is_file() {
+      continue;
+    }
+    if path.extension().and_then(|s| s.to_str()) != Some("zip") {
+      continue;
+    }
+    let meta = std::fs::metadata(&path)?;
+    let mtime = meta
+      .modified()
+      .ok()
+      .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339())
+      .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+    out.push(BackupFileEntry {
+      file_name: path.file_name().unwrap_or_default().to_string_lossy().to_string(),
+      modified_time: mtime,
+      size: meta.len(),
+    });
+  }
+
+  out.sort_by(|a, b| b.modified_time.cmp(&a.modified_time));
+  Ok(out)
+}
+
+pub fn delete_local_backup_file(file_name: String, local_backup_dir: Option<String>) -> Result<bool> {
+  let Some(dir) = local_backup_dir.filter(|s| !s.trim().is_empty()) else {
+    return Ok(false);
+  };
+  let path = PathBuf::from(dir).join(file_name);
+  if !path.exists() {
+    return Ok(false);
+  }
+  std::fs::remove_file(path)?;
+  Ok(true)
+}
+
+fn lan_transfer_dir(state: &State<'_, AppState>) -> PathBuf {
+  state.app_data_dir.join("Temp").join("lan-transfer")
+}
+
+pub fn create_lan_transfer_backup(
+  app: &AppHandle,
+  window: &WebviewWindow,
+  state: &State<'_, AppState>,
+  data: String,
+) -> Result<String> {
+  let timestamp = chrono::Utc::now().format("%Y%m%d%H%M").to_string();
+  let file_name = format!("cherry-studio.{timestamp}.zip");
+  let dir = lan_transfer_dir(state);
+  ensure_dir(&dir)?;
+  allow_dir(state, &dir);
+
+  let args = vec![
+    Value::String(file_name),
+    Value::String(data),
+    Value::String(dir.to_string_lossy().to_string()),
+    Value::Bool(true), // skipBackupFile
+  ];
+  backup_backup(app, window, state, args)
+}
+
+pub fn delete_temp_backup(state: &State<'_, AppState>, file_path: String) -> Result<bool> {
+  let base = lan_transfer_dir(state);
+  let base = base.canonicalize().unwrap_or(base);
+  let target = PathBuf::from(file_path);
+  let target = target.canonicalize().unwrap_or(target);
+
+  if !target.starts_with(&base) {
+    return Ok(false);
+  }
+
+  if target.exists() {
+    std::fs::remove_file(target)?;
+    return Ok(true);
+  }
+  Ok(false)
 }

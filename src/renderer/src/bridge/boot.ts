@@ -1,5 +1,28 @@
 const isTauri = typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__ != null
 
+function detectPlatform(): 'win32' | 'darwin' | 'linux' {
+  const ua = (navigator.userAgent || '').toLowerCase()
+  const p = (navigator.platform || '').toLowerCase()
+
+  if (ua.includes('windows') || p.includes('win')) return 'win32'
+  if (ua.includes('mac') || p.includes('mac')) return 'darwin'
+  if (ua.includes('linux') || p.includes('linux')) return 'linux'
+
+  // Tauri should always be one of these; default to linux.
+  return 'linux'
+}
+
+function detectArch(): string {
+  const ua = (navigator.userAgent || '').toLowerCase()
+
+  if (ua.includes('arm64') || ua.includes('aarch64')) return 'arm64'
+  if (ua.includes('x86_64') || ua.includes('amd64') || ua.includes('win64') || ua.includes('x64')) return 'x64'
+  if (ua.includes('ia32') || ua.includes('x86')) return 'ia32'
+  if (ua.includes('arm')) return 'arm'
+
+  return 'unknown'
+}
+
 function createNotImplementedProxy(path: string[]): any {
   const name = `window.api.${path.join('.')}`
   const fn = (..._args: any[]) => Promise.reject(new Error(`Not implemented: ${name}`))
@@ -26,14 +49,18 @@ function createApiProxy<T extends object>(api: T): T {
 
 async function init() {
   if (!window.electron) {
-    window.electron = { ipcRenderer: null as any, process: { env: {} } }
+    window.electron = { ipcRenderer: null as any, process: { env: {}, platform: 'linux', arch: 'unknown' } }
   }
   if (!window.electron.process) {
-    window.electron.process = { env: {} }
+    window.electron.process = { env: {}, platform: 'linux', arch: 'unknown' }
   }
   if (!window.electron.process.env) {
     window.electron.process.env = {}
   }
+
+  // Synchronously provide Electron-like process metadata before any async imports.
+  window.electron.process.platform = detectPlatform()
+  window.electron.process.arch = detectArch()
   window.electron.process.env.NODE_ENV = import.meta.env.DEV ? 'development' : 'production'
 
   const { createWindowApi } = await import('./api')
@@ -44,6 +71,22 @@ async function init() {
       import('@tauri-apps/api/event'),
       import('@tauri-apps/api/core')
     ])
+
+    if (!window.__DROME_FILE_DROP_QUEUE__) {
+      window.__DROME_FILE_DROP_QUEUE__ = []
+    }
+
+    // Tauri exposes file-drop paths via global events; keep a queue so renderer APIs
+    // can map DOM File objects back to their native paths.
+    void listen<string[]>('tauri://file-drop', (event) => {
+      const paths = event.payload
+      if (Array.isArray(paths)) {
+        window.__DROME_FILE_DROP_QUEUE__?.push(...paths.filter((p): p is string => typeof p === 'string'))
+      }
+    })
+    void listen('tauri://file-drop-cancelled', () => {
+      window.__DROME_FILE_DROP_QUEUE__ = []
+    })
 
     const ipcRenderer = new IpcRendererShim({
       listen,
