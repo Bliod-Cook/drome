@@ -614,6 +614,22 @@ pub async fn ipc_invoke(
                     commands::http::http_fetch(req)
                 })?)
             }
+            "http:fetch-stream:start" => {
+                let req = arg::<commands::http::HttpFetchRequest>(&args, 0)?;
+                to_value(tokio::task::block_in_place(|| {
+                    commands::http::http_fetch_stream_start(req)
+                })?)
+            }
+            "http:fetch-stream:read" => {
+                let req = arg::<commands::http::HttpFetchStreamReadRequest>(&args, 0)?;
+                to_value(tokio::task::block_in_place(|| {
+                    commands::http::http_fetch_stream_read(req)
+                })?)
+            }
+            "http:fetch-stream:cancel" => {
+                let stream_id = arg::<String>(&args, 0)?;
+                to_value(commands::http::http_fetch_stream_cancel(stream_id)?)
+            }
 
             // CherryAI
             "cherryai:get-signature" => {

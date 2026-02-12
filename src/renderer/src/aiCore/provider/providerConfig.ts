@@ -60,6 +60,19 @@ type IpcHttpFetchResponse = {
   bodyBase64: string
 }
 
+type IpcHttpFetchStreamStartResponse = {
+  streamId: string
+  ok: boolean
+  status: number
+  headers: Record<string, string>
+}
+
+type IpcHttpFetchStreamReadResponse = {
+  done: boolean
+  chunkBase64?: string | null
+  error?: string | null
+}
+
 function headersToRecord(init?: HeadersInit): Record<string, string> {
   if (!init) return {}
 
@@ -105,6 +118,92 @@ async function bodyToIpc(body: BodyInit | null | undefined): Promise<Pick<IpcHtt
   return { body: String(body) }
 }
 
+function getHeaderValue(headers: Record<string, string> | undefined, target: string): string | undefined {
+  if (!headers) return undefined
+  const lowerTarget = target.toLowerCase()
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === lowerTarget) {
+      return value
+    }
+  }
+  return undefined
+}
+
+function isStreamingRequest(req: IpcHttpFetchRequest): boolean {
+  const accept = getHeaderValue(req.headers, 'accept')?.toLowerCase() ?? ''
+  if (accept.includes('text/event-stream')) {
+    return true
+  }
+
+  if (!req.body) {
+    return false
+  }
+
+  try {
+    const parsedBody = JSON.parse(req.body)
+    return parsedBody?.stream === true
+  } catch {
+    return false
+  }
+}
+
+async function nativeStreamFetch(
+  invokeChannel: (channel: string, payload: any) => Promise<any>,
+  req: IpcHttpFetchRequest
+): Promise<Response> {
+  const start = (await invokeChannel('http:fetch-stream:start', req)) as IpcHttpFetchStreamStartResponse | null
+  const streamId = start?.streamId
+
+  if (!streamId) {
+    throw new TypeError('Failed to establish streaming response')
+  }
+
+  const responseStatus = typeof start.status === 'number' ? start.status : 200
+  const responseHeaders = typeof start.headers === 'object' && start.headers ? start.headers : {}
+  const readTimeoutMs = req.timeoutMs ?? 30_000
+
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      let readResult: IpcHttpFetchStreamReadResponse | null = null
+
+      try {
+        readResult = (await invokeChannel('http:fetch-stream:read', {
+          streamId,
+          timeoutMs: readTimeoutMs
+        })) as IpcHttpFetchStreamReadResponse
+      } catch (error) {
+        controller.error(error)
+        void invokeChannel('http:fetch-stream:cancel', streamId).catch(() => {})
+        return
+      }
+
+      if (!readResult) {
+        return
+      }
+
+      if (readResult.error) {
+        controller.error(new TypeError(readResult.error))
+        void invokeChannel('http:fetch-stream:cancel', streamId).catch(() => {})
+        return
+      }
+
+      if (readResult.done) {
+        controller.close()
+        return
+      }
+
+      if (typeof readResult.chunkBase64 === 'string' && readResult.chunkBase64.length > 0) {
+        controller.enqueue(Base64.toUint8Array(readResult.chunkBase64))
+      }
+    },
+    async cancel() {
+      await invokeChannel('http:fetch-stream:cancel', streamId).catch(() => {})
+    }
+  })
+
+  return new Response(body, { status: responseStatus, headers: responseHeaders })
+}
+
 // Tauri's WebView enforces CORS; proxy network requests through Rust to match Electron's `webSecurity: false` behavior.
 async function nativeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   if (typeof window === 'undefined' || (window as any).__TAURI_INTERNALS__ == null) {
@@ -135,6 +234,18 @@ async function nativeFetch(input: RequestInfo | URL, init?: RequestInit): Promis
     headers,
     body,
     bodyBase64
+  }
+
+  if (isStreamingRequest(req)) {
+    try {
+      return await nativeStreamFetch(invokeChannel, req)
+    } catch (error) {
+      const message = typeof error === 'string' ? error : (error as any)?.message ?? ''
+      // Backward-compatible fallback for older runtimes that don't support stream channels yet.
+      if (message !== 'Failed to establish streaming response') {
+        throw error
+      }
+    }
   }
 
   let result: IpcHttpFetchResponse
