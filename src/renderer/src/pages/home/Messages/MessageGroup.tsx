@@ -26,6 +26,28 @@ interface Props {
   registerMessageElement?: (id: string, element: HTMLElement | null) => void
 }
 
+const areMessageGroupPropsEqual = (prevProps: Props, nextProps: Props) => {
+  if (prevProps.topic !== nextProps.topic) {
+    return false
+  }
+
+  if (prevProps.registerMessageElement !== nextProps.registerMessageElement) {
+    return false
+  }
+
+  if (prevProps.messages.length !== nextProps.messages.length) {
+    return false
+  }
+
+  for (let i = 0; i < prevProps.messages.length; i++) {
+    if (prevProps.messages[i] !== nextProps.messages[i]) {
+      return false
+    }
+  }
+
+  return true
+}
+
 const MessageGroup = ({ messages, topic, registerMessageElement }: Props) => {
   const messageLength = messages.length
 
@@ -424,4 +446,4 @@ const MessageWrapper = styled.div<MessageWrapperProps>`
   }
 `
 
-export default memo(MessageGroup)
+export default memo(MessageGroup, areMessageGroupPropsEqual)

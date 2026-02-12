@@ -6,7 +6,7 @@ import { MessageBlockStatus, MessageBlockType } from '@renderer/types/newMessage
 import { isMainTextBlock, isMessageProcessing, isToolBlock, isVideoBlock } from '@renderer/utils/messageUtils/is'
 import { AnimatePresence, motion, type Variants } from 'motion/react'
 import React, { useMemo } from 'react'
-import { useSelector } from 'react-redux'
+import { shallowEqual, useSelector } from 'react-redux'
 import styled from 'styled-components'
 
 import CitationBlock from './CitationBlock'
@@ -65,78 +65,84 @@ interface Props {
 }
 
 const groupSimilarBlocks = (blocks: MessageBlock[]): (MessageBlock[] | MessageBlock)[] => {
-  return blocks.reduce((acc: (MessageBlock[] | MessageBlock)[], currentBlock) => {
+  const groupedBlocks: (MessageBlock[] | MessageBlock)[] = []
+  const videoGroupsByFilePath = new Map<string, MessageBlock[]>()
+
+  for (const currentBlock of blocks) {
     if (currentBlock.type === MessageBlockType.IMAGE) {
       // 对于IMAGE类型，按连续分组
-      const prevGroup = acc[acc.length - 1]
+      const prevGroup = groupedBlocks[groupedBlocks.length - 1]
       if (Array.isArray(prevGroup) && prevGroup[0].type === MessageBlockType.IMAGE) {
         prevGroup.push(currentBlock)
       } else {
-        acc.push([currentBlock])
+        groupedBlocks.push([currentBlock])
       }
     } else if (currentBlock.type === MessageBlockType.VIDEO) {
       // 对于VIDEO类型，按相同filePath分组
       if (!isVideoBlock(currentBlock)) {
         logger.warn('Block type is VIDEO but failed type guard check', currentBlock)
-        acc.push(currentBlock)
-        return acc
+        groupedBlocks.push(currentBlock)
+        continue
       }
       const videoBlock = currentBlock
-      const existingGroup = acc.find(
-        (group) =>
-          Array.isArray(group) &&
-          group[0].type === MessageBlockType.VIDEO &&
-          isVideoBlock(group[0]) &&
-          group[0].filePath === videoBlock.filePath
-      ) as MessageBlock[] | undefined
+      const videoGroupKey = videoBlock.filePath ?? '__unknown_video_file_path__'
+      const existingGroup = videoGroupsByFilePath.get(videoGroupKey)
 
       if (existingGroup) {
         existingGroup.push(currentBlock)
       } else {
-        acc.push([currentBlock])
+        const newGroup: MessageBlock[] = [currentBlock]
+        videoGroupsByFilePath.set(videoGroupKey, newGroup)
+        groupedBlocks.push(newGroup)
       }
     } else if (currentBlock.type === MessageBlockType.TOOL) {
       // 对于TOOL类型，按连续分组
-      const prevGroup = acc[acc.length - 1]
+      const prevGroup = groupedBlocks[groupedBlocks.length - 1]
       if (Array.isArray(prevGroup) && prevGroup[0].type === MessageBlockType.TOOL) {
         prevGroup.push(currentBlock)
       } else {
-        acc.push([currentBlock])
+        groupedBlocks.push([currentBlock])
       }
     } else {
-      acc.push(currentBlock)
+      groupedBlocks.push(currentBlock)
     }
-    return acc
-  }, [])
+  }
+
+  return groupedBlocks
 }
 
 const MessageBlockRenderer: React.FC<Props> = ({ blocks, message }) => {
-  // 始终调用useSelector，避免条件调用Hook
-  const blockEntities = useSelector((state: RootState) => messageBlocksSelectors.selectEntities(state))
-  // 根据blocks类型处理渲染数据
-  const renderedBlocks = blocks.map((blockId) => blockEntities[blockId]).filter(Boolean)
+  // 仅订阅当前消息对应的 block，避免任意 block 变化触发全量重渲染
+  const renderedBlocks = useSelector(
+    (state: RootState) =>
+      blocks
+        .map((blockId) => messageBlocksSelectors.selectById(state, blockId))
+        .filter((block): block is MessageBlock => !!block),
+    shallowEqual
+  )
   const groupedBlocks = useMemo(() => groupSimilarBlocks(renderedBlocks), [renderedBlocks])
 
   // Check if message is still processing
   const isProcessing = isMessageProcessing(message)
+  const enableAnimation = message.status.includes('ing')
 
   return (
     <AnimatePresence mode="sync">
       {groupedBlocks.map((block) => {
         if (Array.isArray(block)) {
-          const groupKey = block.map((b) => b.id).join('-')
+          const groupKey = `${block[0].type}-group-${block[0].id}`
 
           if (block[0].type === MessageBlockType.IMAGE) {
             if (block.length === 1) {
               return (
-                <AnimatedBlockWrapper key={groupKey} enableAnimation={message.status.includes('ing')}>
+                <AnimatedBlockWrapper key={groupKey} enableAnimation={enableAnimation}>
                   <ImageBlock key={block[0].id} block={block[0] as ImageMessageBlock} isSingle={true} />
                 </AnimatedBlockWrapper>
               )
             }
             // 多张图片使用 ImageBlockGroup 包装
             return (
-              <AnimatedBlockWrapper key={groupKey} enableAnimation={message.status.includes('ing')}>
+              <AnimatedBlockWrapper key={groupKey} enableAnimation={enableAnimation}>
                 <ImageBlockGroup count={block.length}>
                   {block.map((imageBlock) => (
                     <ImageBlock key={imageBlock.id} block={imageBlock as ImageMessageBlock} isSingle={false} />
@@ -152,7 +158,7 @@ const MessageBlockRenderer: React.FC<Props> = ({ blocks, message }) => {
             }
             const firstVideoBlock = block[0]
             return (
-              <AnimatedBlockWrapper key={groupKey} enableAnimation={message.status.includes('ing')}>
+              <AnimatedBlockWrapper key={groupKey} enableAnimation={enableAnimation}>
                 <VideoBlock key={firstVideoBlock.id} block={firstVideoBlock} />
               </AnimatedBlockWrapper>
             )
@@ -165,7 +171,7 @@ const MessageBlockRenderer: React.FC<Props> = ({ blocks, message }) => {
                 return null
               }
               return (
-                <AnimatedBlockWrapper key={groupKey} enableAnimation={message.status.includes('ing')}>
+                <AnimatedBlockWrapper key={groupKey} enableAnimation={enableAnimation}>
                   <ToolBlock key={block[0].id} block={block[0]} />
                 </AnimatedBlockWrapper>
               )
@@ -175,7 +181,7 @@ const MessageBlockRenderer: React.FC<Props> = ({ blocks, message }) => {
             // Use first block ID as stable key to prevent remounting when new blocks are added
             const stableGroupKey = `tool-group-${toolBlocks[0].id}`
             return (
-              <AnimatedBlockWrapper key={stableGroupKey} enableAnimation={message.status.includes('ing')}>
+              <AnimatedBlockWrapper key={stableGroupKey} enableAnimation={enableAnimation}>
                 <ToolBlockGroup blocks={toolBlocks} />
               </AnimatedBlockWrapper>
             )
@@ -242,7 +248,7 @@ const MessageBlockRenderer: React.FC<Props> = ({ blocks, message }) => {
         }
 
         return (
-          <AnimatedBlockWrapper key={block.id} enableAnimation={message.status.includes('ing')}>
+          <AnimatedBlockWrapper key={block.id} enableAnimation={enableAnimation}>
             {blockComponent}
           </AnimatedBlockWrapper>
         )
