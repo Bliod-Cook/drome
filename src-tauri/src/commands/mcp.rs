@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::{Arc, OnceLock, Weak};
@@ -30,6 +30,7 @@ use crate::error::{DromeError, Result};
 const MCP_SERVER_LOG_CHANNEL: &str = "mcp:server-log";
 const MCP_PROGRESS_CHANNEL: &str = "mcp:progress";
 const LOG_LIMIT: usize = 200;
+const NOWLEDGE_MEM_STREAMABLE_HTTP_URL: &str = "http://127.0.0.1:14242/mcp";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -299,6 +300,12 @@ struct McpServerLogEvent {
 struct McpProgressEvent {
     call_id: String,
     progress: f64,
+}
+
+#[derive(Debug, Clone)]
+struct InMemoryLaunchCandidate {
+    server: McpServer,
+    label: String,
 }
 
 #[derive(Debug)]
@@ -955,42 +962,14 @@ impl McpManager {
             Arc::downgrade(self),
         ));
 
-        let transport_type = server.transport_type();
-        let mut stderr_stream = None;
-
-        let running = match transport_type {
-            "stdio" => {
-                let (transport, stderr) = build_stdio_transport(&server)?;
-                stderr_stream = stderr;
-                handler.clone().serve(transport).await.map_err(|e| {
-                    DromeError::Message(format!("Failed to connect MCP stdio server: {e}"))
-                })?
+        let (running, stderr_stream) = match server.transport_type() {
+            "inMemory" => connect_in_memory_candidates(handler.clone(), &server).await?,
+            "stdio" | "streamableHttp" | "sse" => {
+                connect_with_transport(handler.clone(), &server).await?
             }
-            "streamableHttp" | "sse" => {
-                let transport = build_http_transport(&server)?;
-                handler.clone().serve(transport).await.map_err(|e| {
-                    DromeError::Message(format!("Failed to connect MCP HTTP server: {e}"))
-                })?
-            }
-            "inMemory" => {
-                if server.command.is_some() {
-                    let (transport, stderr) = build_stdio_transport(&server)?;
-                    stderr_stream = stderr;
-                    handler.clone().serve(transport).await.map_err(|e| {
-                        DromeError::Message(format!(
-                            "Failed to connect inMemory(command) MCP server: {e}"
-                        ))
-                    })?
-                } else {
-                    return Err(DromeError::Message(
-                        "In-memory MCP servers are not supported in this Tauri build".to_string(),
-                    ));
-                }
-            }
-            _ => {
+            other => {
                 return Err(DromeError::Message(format!(
-                    "Unsupported MCP transport type: {}",
-                    server.transport_type()
+                    "Unsupported MCP transport type: {other}"
                 )));
             }
         };
@@ -1451,6 +1430,163 @@ fn progress_token_key(token: &rmcp::model::ProgressToken) -> String {
         NumberOrString::Number(num) => format!("n:{num}"),
         NumberOrString::String(text) => format!("s:{text}"),
     }
+}
+
+fn in_memory_public_fallback_package(server_name: &str) -> Option<&'static str> {
+    match server_name {
+        "@cherry/memory" => Some("@modelcontextprotocol/server-memory"),
+        "@cherry/sequentialthinking" => Some("@modelcontextprotocol/server-sequential-thinking"),
+        "@cherry/brave-search" => Some("@modelcontextprotocol/server-brave-search"),
+        "@cherry/filesystem" => Some("@modelcontextprotocol/server-filesystem"),
+        "@cherry/fetch" => Some("fetch-mcp"),
+        "@cherry/browser" => Some("@playwright/mcp"),
+        _ => None,
+    }
+}
+
+fn candidate_signature(server: &McpServer) -> String {
+    serde_json::to_string(&json!({
+        "type": server.transport_type(),
+        "command": server.command,
+        "args": server.args,
+        "baseUrl": server.base_url,
+    }))
+    .unwrap_or_default()
+}
+
+fn build_in_memory_launch_candidates(server: &McpServer) -> Vec<InMemoryLaunchCandidate> {
+    let mut candidates = Vec::new();
+    let mut seen = HashSet::new();
+
+    if server.name == "@cherry/nowledge-mem" {
+        let mut candidate = server.clone();
+        candidate.r#type = Some("streamableHttp".to_string());
+        candidate.base_url = Some(NOWLEDGE_MEM_STREAMABLE_HTTP_URL.to_string());
+        candidate.command = None;
+        candidate.args = None;
+
+        if seen.insert(candidate_signature(&candidate)) {
+            candidates.push(InMemoryLaunchCandidate {
+                label: format!("streamableHttp {}", NOWLEDGE_MEM_STREAMABLE_HTTP_URL),
+                server: candidate,
+            });
+        }
+    }
+
+    let mut package_candidates = vec![server.name.clone()];
+
+    if server.name == "@cherry/mcp-auto-install" {
+        package_candidates.push("@mcpmarket/mcp-auto-install".to_string());
+    }
+
+    if let Some(mapped) = in_memory_public_fallback_package(&server.name) {
+        package_candidates.push(mapped.to_string());
+    }
+
+    package_candidates.retain(|name| !name.trim().is_empty());
+    package_candidates.dedup();
+
+    for package in package_candidates {
+        for runner in ["npx", "bunx"] {
+            let mut args = Vec::new();
+            if runner == "npx" {
+                args.push("-y".to_string());
+            }
+            args.push(package.clone());
+
+            if package == "@mcpmarket/mcp-auto-install" {
+                args.push("connect".to_string());
+                args.push("--json".to_string());
+            }
+
+            if let Some(user_args) = &server.args {
+                args.extend(user_args.clone());
+            }
+
+            let mut candidate = server.clone();
+            candidate.r#type = Some("stdio".to_string());
+            candidate.base_url = None;
+            candidate.command = Some(runner.to_string());
+            candidate.args = Some(args.clone());
+
+            if seen.insert(candidate_signature(&candidate)) {
+                candidates.push(InMemoryLaunchCandidate {
+                    label: format!("{runner} {}", args.join(" ")),
+                    server: candidate,
+                });
+            }
+        }
+    }
+
+    candidates
+}
+
+async fn connect_with_transport(
+    handler: Arc<TauriClientHandler>,
+    server: &McpServer,
+) -> Result<(
+    RunningService<RoleClient, Arc<TauriClientHandler>>,
+    Option<tokio::process::ChildStderr>,
+)> {
+    match server.transport_type() {
+        "stdio" => {
+            let (transport, stderr) = build_stdio_transport(server)?;
+            let running = handler.serve(transport).await.map_err(|e| {
+                DromeError::Message(format!("Failed to connect MCP stdio server: {e}"))
+            })?;
+            Ok((running, stderr))
+        }
+        "streamableHttp" | "sse" => {
+            let transport = build_http_transport(server)?;
+            let running = handler.serve(transport).await.map_err(|e| {
+                DromeError::Message(format!("Failed to connect MCP HTTP server: {e}"))
+            })?;
+            Ok((running, None))
+        }
+        other => Err(DromeError::Message(format!(
+            "Unsupported MCP transport type for connection: {other}"
+        ))),
+    }
+}
+
+async fn connect_in_memory_candidates(
+    handler: Arc<TauriClientHandler>,
+    server: &McpServer,
+) -> Result<(
+    RunningService<RoleClient, Arc<TauriClientHandler>>,
+    Option<tokio::process::ChildStderr>,
+)> {
+    if server.command.is_some() || server.base_url.is_some() {
+        let mut direct = server.clone();
+        direct.r#type = if direct.base_url.is_some() {
+            Some("streamableHttp".to_string())
+        } else {
+            Some("stdio".to_string())
+        };
+        return connect_with_transport(handler, &direct).await;
+    }
+
+    let candidates = build_in_memory_launch_candidates(server);
+    if candidates.is_empty() {
+        return Err(DromeError::Message(format!(
+            "No launch candidates available for inMemory MCP server `{}`",
+            server.name
+        )));
+    }
+
+    let mut failures = Vec::new();
+    for candidate in candidates {
+        match connect_with_transport(handler.clone(), &candidate.server).await {
+            Ok(connected) => return Ok(connected),
+            Err(err) => failures.push(format!("{} => {}", candidate.label, err)),
+        }
+    }
+
+    Err(DromeError::Message(format!(
+        "Failed to start inMemory MCP server `{}`. Attempts: {}",
+        server.name,
+        failures.join(" | ")
+    )))
 }
 
 fn server_key(server: &McpServer) -> String {
